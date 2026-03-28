@@ -1,10 +1,4 @@
-mod ignore;
-mod scanner;
-mod bm25;
-mod mtime_cache;
-mod context;
-mod mcp;
-
+use rs_search::{bm25, context, mcp, mtime_cache, scanner};
 use std::fs;
 use std::path::Path;
 use clap::Parser;
