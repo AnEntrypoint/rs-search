@@ -45,18 +45,19 @@ pub fn scan_repository(root: &Path) -> Vec<Chunk> {
             .unwrap_or(0);
 
         let content = match fs::read_to_string(full) { Ok(c) => c, Err(_) => continue };
-        let lines: Vec<&str> = content.split('\n').collect();
+        let line_count = content.split('\n').count();
 
-        if lines.len() <= 60 {
+        if line_count <= 60 {
             chunks.push(Chunk {
                 file_path: rel,
                 chunk_index: 0,
+                line_end: line_count,
                 content,
                 line_start: 1,
-                line_end: lines.len(),
                 mtime,
             });
         } else {
+            let lines: Vec<&str> = content.split('\n').collect();
             let chunk_size = 60usize;
             let overlap = 15usize;
             let step = chunk_size - overlap;
