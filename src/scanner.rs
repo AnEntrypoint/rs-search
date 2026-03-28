@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::Path;
-use walkdir::WalkDir;
 use crate::ignore::{load_ignore_patterns, should_ignore, should_ignore_dir};
 
 #[derive(Clone)]
@@ -13,68 +12,42 @@ pub struct Chunk {
     pub mtime: u64,
 }
 
-pub fn scan_repository(root: &Path) -> Vec<Chunk> {
-    let patterns = load_ignore_patterns(root);
-    let mut chunks = Vec::new();
-
-    for entry in WalkDir::new(root).min_depth(1).into_iter() {
-        let entry = match entry { Ok(e) => e, Err(_) => continue };
+fn walk(dir: &Path, root: &Path, patterns: &std::collections::HashSet<String>, chunks: &mut Vec<Chunk>) {
+    let entries = match fs::read_dir(dir) { Ok(e) => e, Err(_) => return };
+    for entry in entries.flatten() {
         let full = entry.path();
         let rel = match full.strip_prefix(root) {
             Ok(r) => r.to_string_lossy().replace('\\', "/"),
             Err(_) => continue,
         };
-
-        if entry.file_type().is_dir() {
-            if let Some(name) = full.file_name().and_then(|n| n.to_str()) {
-                if should_ignore_dir(name) { continue; }
-            }
-            if should_ignore(&rel, &patterns, true) { continue; }
+        let ft = match entry.file_type() { Ok(t) => t, Err(_) => continue };
+        if ft.is_dir() {
+            let name = full.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if should_ignore_dir(name) || should_ignore(&rel, patterns, true) { continue; }
+            walk(&full, root, patterns, chunks);
             continue;
         }
-
-        if !entry.file_type().is_file() { continue; }
-        if should_ignore(&rel, &patterns, false) { continue; }
-
-        let meta = match fs::metadata(full) { Ok(m) => m, Err(_) => continue };
+        if !ft.is_file() { continue; }
+        if should_ignore(&rel, patterns, false) { continue; }
+        let meta = match fs::metadata(&full) { Ok(m) => m, Err(_) => continue };
         if meta.len() > 5 * 1024 * 1024 { continue; }
-
         let mtime = meta.modified().ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        let content = match fs::read_to_string(full) { Ok(c) => c, Err(_) => continue };
+            .map(|d| d.as_secs()).unwrap_or(0);
+        let content = match fs::read_to_string(&full) { Ok(c) => c, Err(_) => continue };
         let line_count = content.split('\n').count();
-
         if line_count <= 60 {
-            chunks.push(Chunk {
-                file_path: rel,
-                chunk_index: 0,
-                line_end: line_count,
-                content,
-                line_start: 1,
-                mtime,
-            });
+            chunks.push(Chunk { file_path: rel, chunk_index: 0, line_end: line_count, content, line_start: 1, mtime });
         } else {
             let lines: Vec<&str> = content.split('\n').collect();
-            let chunk_size = 60usize;
-            let overlap = 15usize;
-            let step = chunk_size - overlap;
+            let step = 60 - 15;
             let mut i = 0usize;
             let mut idx = 0usize;
             loop {
-                let end = (i + chunk_size).min(lines.len());
+                let end = (i + 60).min(lines.len());
                 let chunk_content = lines[i..end].join("\n");
                 if !chunk_content.trim().is_empty() {
-                    chunks.push(Chunk {
-                        file_path: rel.clone(),
-                        chunk_index: idx,
-                        content: chunk_content,
-                        line_start: i + 1,
-                        line_end: end,
-                        mtime,
-                    });
+                    chunks.push(Chunk { file_path: rel.clone(), chunk_index: idx, content: chunk_content, line_start: i + 1, line_end: end, mtime });
                     idx += 1;
                 }
                 if end == lines.len() { break; }
@@ -82,6 +55,11 @@ pub fn scan_repository(root: &Path) -> Vec<Chunk> {
             }
         }
     }
+}
 
+pub fn scan_repository(root: &Path) -> Vec<Chunk> {
+    let patterns = load_ignore_patterns(root);
+    let mut chunks = Vec::new();
+    walk(root, root, &patterns, &mut chunks);
     chunks
 }
