@@ -28,6 +28,7 @@ pub static IGNORED_DIRS: &[&str] = &[
     "chromadb","pinecone-cache","weaviate-data",
     ".pnpm",".bun",
     "assets","static","public","wwwroot","www",
+    ".plugkit-browser-profile",
     "cmake_build_debug","cmake_build_release","CMakeFiles",
     ".code-search",
 ];
@@ -72,7 +73,7 @@ pub static CODE_EXTENSIONS: &[&str] = &[
     ".xml",".xsd",".html",".htm",".yml",".yaml",".toml",
     ".css",".scss",".sass",".less",
     ".sql",
-    ".md",".markdown",".txt",
+    ".md",".markdown",".txt",".prd",
 ];
 
 static BINARY_EXTENSIONS: &[&str] = &[
