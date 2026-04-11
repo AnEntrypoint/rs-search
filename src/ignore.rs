@@ -70,7 +70,7 @@ pub static CODE_EXTENSIONS: &[&str] = &[
     ".svelte",
     ".coffee",
     ".re",".rei",
-    ".xml",".xsd",".html",".htm",".yml",".yaml",".toml",
+    ".xml",".xsd",".html",".htm",".yml",".yaml",".toml",".json",
     ".css",".scss",".sass",".less",
     ".sql",
     ".md",".markdown",".txt",".prd",
