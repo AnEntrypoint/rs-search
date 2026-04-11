@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use serde_json::{json, Value};
 use crate::scanner::scan_repository;
 use crate::bm25::search;
+use crate::embed::rerank;
+use crate::assemble;
 use crate::context::{find_enclosing_context, get_file_total_lines};
 
 struct IndexCache {
@@ -46,7 +48,7 @@ pub fn run_mcp_server() {
                 "jsonrpc": "2.0", "id": id,
                 "result": { "tools": [{
                     "name": "search",
-                    "description": "Search through a code repository using BM25 text search.",
+                    "description": "Search through a code repository using BM25 + vector hybrid search.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -82,7 +84,14 @@ pub fn run_mcp_server() {
                             cache.insert(repo.clone(), IndexCache { chunks: ch.clone(), indexed_at: now });
                             ch
                         };
-                        let results = search(query, &chunks);
+                        let bm25_results = search(query, &chunks);
+                        let models_dir = repo_path.join(".code-search").join("models");
+                        let model_path = assemble::model_path(&models_dir);
+                        let results = if model_path.exists() {
+                            rerank(bm25_results, query, &model_path)
+                        } else {
+                            bm25_results
+                        };
                         let text = format_results(&results, query, repo_path);
                         json!({ "jsonrpc": "2.0", "id": id, "result": { "content": [{ "type": "text", "text": text }] } })
                     }
@@ -112,6 +121,11 @@ fn format_results(results: &[crate::bm25::SearchResult], query: &str, root: &Pat
         out.push_str(&format!("{}. {}{}: {}-{}{} (score: {}%)\n",
             i + 1, r.chunk.file_path, total,
             r.chunk.line_start, r.chunk.line_end, ctx, score_pct));
+        if let Some(vs) = r.vector_score {
+            out.push_str(&format!("   BM25: {:.2}  Vector: {:.4}\n", r.bm25_raw, vs));
+        } else {
+            out.push_str(&format!("   BM25: {:.2}\n", r.bm25_raw));
+        }
         for line in r.chunk.content.split('\n').take(30) {
             out.push_str(&format!("   {}\n", line));
         }
