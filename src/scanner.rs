@@ -30,7 +30,7 @@ fn walk(dir: &Path, root: &Path, patterns: &std::collections::HashSet<String>, c
         if !ft.is_file() { continue; }
         if should_ignore(&rel, patterns, false) { continue; }
         let meta = match fs::metadata(&full) { Ok(m) => m, Err(_) => continue };
-        if meta.len() > 5 * 1024 * 1024 { continue; }
+        if meta.len() > 50 * 1024 * 1024 { continue; }
         let mtime = meta.modified().ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs()).unwrap_or(0);
