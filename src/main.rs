@@ -1,10 +1,10 @@
-use rs_search::{bm25, context, mcp, mtime_cache, scanner};
+use rs_search::{assemble, bm25, context, embed, mcp, mtime_cache, scanner};
 use std::fs;
 use std::path::Path;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "rs-search", about = "BM25 codebase search with MCP protocol support")]
+#[command(name = "rs-search", about = "BM25 + vector codebase search with MCP protocol support")]
 struct Cli {
     query: Vec<String>,
 }
@@ -44,6 +44,34 @@ fn main() {
     let db_path = root.join(".code-search");
     let _ = fs::create_dir_all(&db_path);
 
+    let models_dir = db_path.join("models");
+    let _ = fs::create_dir_all(&models_dir);
+
+    let exe_dir = std::env::current_exe().ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let src_models = exe_dir.as_deref()
+        .map(|d| d.join("models"))
+        .filter(|p| p.exists())
+        .or_else(|| {
+            let m = root.join("models");
+            if m.exists() { Some(m) } else { None }
+        });
+
+    let model_path = if !assemble::model_path(&models_dir).exists() {
+        if let Some(src) = &src_models {
+            match assemble::ensure_assembled(src) {
+                Ok(p) => {
+                    let dst = models_dir.join(p.file_name().unwrap());
+                    if !dst.exists() { let _ = fs::copy(&p, &dst); }
+                    Some(dst)
+                }
+                Err(e) => { eprintln!("model assemble: {}", e); None }
+            }
+        } else { None }
+    } else {
+        Some(assemble::model_path(&models_dir))
+    };
+
     let mut cache = mtime_cache::MtimeCache::load(&db_path);
 
     println!("Scanning repository...");
@@ -74,10 +102,17 @@ fn main() {
     }
     cache.save();
 
-    let reindex_chunks: Vec<_> = chunks.iter().filter(|c| files_to_reindex.contains(&c.file_path)).collect();
-    println!("Files to re-index: {} ({} chunks), deleted: {}\n", files_to_reindex.len(), reindex_chunks.len(), deleted.len());
+    println!("Files to re-index: {} ({} chunks), deleted: {}\n", files_to_reindex.len(),
+        chunks.iter().filter(|c| files_to_reindex.contains(&c.file_path)).count(), deleted.len());
 
     let results = bm25::search(&query, &chunks);
+    let results = if let Some(mp) = &model_path {
+        println!("Applying vector re-ranking...");
+        embed::rerank(results, &query, mp)
+    } else {
+        eprintln!("Vector model not available, using BM25 only.");
+        results
+    };
 
     if results.is_empty() {
         println!("No results found.");
@@ -94,6 +129,9 @@ fn main() {
             .map(|c| format!(" (in: {})", c)).unwrap_or_default();
         println!("{}. {}{}: {}-{}{} (score: {}%)", i + 1, r.chunk.file_path, total, r.chunk.line_start, r.chunk.line_end, ctx, score_pct);
         println!("   BM25: {:.2}", r.bm25_raw);
+        if let Some(vs) = r.vector_score {
+            println!("   Vector: {:.4}", vs);
+        }
         for line in r.chunk.content.split('\n').take(3) {
             println!("   > {}", &line[..line.len().min(80)]);
         }
