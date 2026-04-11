@@ -28,6 +28,7 @@ pub struct SearchResult {
     pub chunk: Chunk,
     pub score: f64,
     pub bm25_raw: f64,
+    pub vector_score: Option<f32>,
 }
 
 fn split_camel(word: &str) -> Vec<String> {
@@ -182,6 +183,7 @@ pub fn search(query: &str, chunks: &[Chunk]) -> Vec<SearchResult> {
         chunk: chunks[idx].clone(),
         score: raw / max_score,
         bm25_raw: raw,
+        vector_score: None,
     }).collect();
 
     results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
