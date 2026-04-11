@@ -66,6 +66,35 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
+pub fn embed_query(query: &str, model_path: &Path) -> Option<Vec<f32>> {
+    let embedder = EMBEDDER.get_or_init(|| load(model_path));
+    let embedder = embedder.as_ref().ok()?;
+    let q_text = format!("search_query: {}", query);
+    embed(embedder, &q_text).ok()
+}
+
+pub fn vector_search_texts(query: &str, items: &[(String, String)], model_path: &Path) -> Vec<(String, f32)> {
+    let embedder = EMBEDDER.get_or_init(|| load(model_path));
+    let embedder = match embedder {
+        Ok(e) => e,
+        Err(e) => { eprintln!("vector search unavailable: {}", e); return vec![]; }
+    };
+    let q_text = format!("search_query: {}", query);
+    let q_emb = match embed(embedder, &q_text) {
+        Ok(v) => v,
+        Err(e) => { eprintln!("embed query: {}", e); return vec![]; }
+    };
+    let mut scored: Vec<(String, f32)> = items.iter().filter_map(|(id, text)| {
+        let doc_text = format!("search_document: {}", &text[..text.len().min(1024)]);
+        match embed(embedder, &doc_text) {
+            Ok(d_emb) => Some((id.clone(), cosine(&q_emb, &d_emb))),
+            Err(_) => None,
+        }
+    }).collect();
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored
+}
+
 pub fn rerank(mut results: Vec<SearchResult>, query: &str, model_path: &Path) -> Vec<SearchResult> {
     let embedder = EMBEDDER.get_or_init(|| load(model_path));
     let embedder = match embedder {

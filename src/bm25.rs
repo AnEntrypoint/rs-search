@@ -24,6 +24,7 @@ struct ChunkMeta {
     content_lower: String,
 }
 
+#[derive(Clone)]
 pub struct SearchResult {
     pub chunk: Chunk,
     pub score: f64,
@@ -99,6 +100,44 @@ fn is_code_file(path: &str) -> bool {
     let lower = path.to_lowercase();
     let ext = lower.rfind('.').map(|i| &lower[i..]).unwrap_or("");
     code_exts.contains(&ext)
+}
+
+pub fn search_texts(query: &str, items: &[(String, String)]) -> Vec<(String, f64)> {
+    if query.trim().is_empty() { return vec![]; }
+    let mut index: HashMap<String, HashSet<usize>> = HashMap::new();
+    let mut freqs: Vec<HashMap<String, u32>> = Vec::with_capacity(items.len());
+    for (idx, (_, text)) in items.iter().enumerate() {
+        let freq = tokenize_to_frequency(text, &mut index, idx);
+        freqs.push(freq);
+    }
+    let n = items.len();
+    let mut idf: HashMap<String, f64> = HashMap::new();
+    for (token, doc_set) in &index {
+        idf.insert(token.clone(), ((n + 1) as f64 / (doc_set.len() + 1) as f64).ln() + 1.0);
+    }
+    let query_tokens = tokenize(query);
+    let mut candidates: HashSet<usize> = HashSet::new();
+    for token in &query_tokens { if let Some(set) = index.get(token) { candidates.extend(set); } }
+    let mut scores: Vec<(usize, f64)> = candidates.into_iter().filter_map(|idx| {
+        let freq = &freqs[idx];
+        let text_lower = items[idx].1.to_lowercase();
+        let query_lower = query.to_lowercase();
+        let mut score = 0.0f64;
+        if query_tokens.len() > 1 && text_lower.contains(&query_lower) { score += 30.0; }
+        for token in &query_tokens {
+            if let Some(doc_set) = index.get(token) {
+                if doc_set.contains(&idx) {
+                    let tf = (*freq.get(token).unwrap_or(&1)).min(5) as f64;
+                    let lb = if token.len() > 4 { 1.5 } else { 1.0 };
+                    score += lb * tf * *idf.get(token).unwrap_or(&1.0);
+                }
+            }
+        }
+        if score > 0.0 { Some((idx, score)) } else { None }
+    }).collect();
+    scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let max = scores.first().map(|s| s.1).unwrap_or(1.0);
+    scores.iter().map(|(idx, raw)| (items[*idx].0.clone(), raw / max)).collect()
 }
 
 pub fn search(query: &str, chunks: &[Chunk]) -> Vec<SearchResult> {
