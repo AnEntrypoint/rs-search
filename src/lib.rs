@@ -1,3 +1,4 @@
+pub mod assemble;
 pub mod bm25;
 pub mod context;
 pub mod ignore;
