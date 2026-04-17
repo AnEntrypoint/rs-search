@@ -74,6 +74,7 @@ pub static CODE_EXTENSIONS: &[&str] = &[
     ".css",".scss",".sass",".less",
     ".sql",
     ".md",".markdown",".txt",".prd",
+    ".pdf",
 ];
 
 static BINARY_EXTENSIONS: &[&str] = &[
@@ -81,7 +82,7 @@ static BINARY_EXTENSIONS: &[&str] = &[
     ".exe",".dll",".so",".dylib",".bin",
     ".jpg",".jpeg",".png",".gif",".bmp",".svg",".ico",
     ".mp3",".mp4",".mov",".avi",".flv",".m4a",
-    ".pdf",".doc",".docx",".xls",".xlsx",
+    ".doc",".docx",".xls",".xlsx",
     ".woff",".woff2",".ttf",".otf",".eot",
 ];
 
