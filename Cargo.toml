@@ -19,3 +19,4 @@ candle-core = "0.10"
 candle-nn = "0.10"
 candle-transformers = "0.10"
 tokenizers = { version = "0.22", default-features = false }
+pdf-extract = "0.9"

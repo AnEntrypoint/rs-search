@@ -6,6 +6,7 @@ pub mod git;
 pub mod ignore;
 pub mod mcp;
 pub mod mtime_cache;
+pub mod pdf;
 pub mod scanner;
 
 use std::path::Path;
