@@ -135,6 +135,18 @@ check('all rust files under 200 lines', () => {
     }
 });
 
+check('ignore.rs has suffix/prefix wildcard tables', () => {
+    const c = read('src/ignore.rs');
+    if (!c.includes('IGNORED_DIR_SUFFIXES')) throw new Error('suffix table missing');
+    if (!c.includes('IGNORED_DIR_PREFIXES')) throw new Error('prefix table missing');
+    if (!c.includes('-browser-profile')) throw new Error('browser profile suffix missing');
+});
+
+check('scanner prunes with filter_entry', () => {
+    const c = read('src/scanner.rs');
+    if (!c.includes('filter_entry')) throw new Error('filter_entry missing');
+});
+
 check('no // or /* comments in rust source', () => {
     const dir = path.join(root, 'src');
     for (const f of fs.readdirSync(dir)) {

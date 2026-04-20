@@ -62,6 +62,10 @@ pub fn scan_repository(root: &Path) -> Vec<Chunk> {
         .ignore(true)
         .parents(true)
         .add_custom_ignore_filename(".codesearchignore")
+        .filter_entry(|e| {
+            let name = e.file_name().to_str().unwrap_or("");
+            !should_ignore_dir(name)
+        })
         .build();
     for result in walker {
         let entry = match result { Ok(e) => e, Err(_) => continue };
