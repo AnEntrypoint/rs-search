@@ -1,6 +1,7 @@
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use serde_json::{json, Value};
 use crate::scanner::scan_repository;
 use crate::bm25::{search, search_texts};
@@ -18,8 +19,57 @@ fn dir_mtime(path: &Path) -> u64 {
     std::fs::metadata(path).ok()
         .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+        .map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default().as_millis() as u64
+}
+
+fn run_search_tool(
+    repo: &str,
+    query: &str,
+    cache: &mut HashMap<String, IndexCache>,
+) -> String {
+    let repo_path = Path::new(repo);
+    let dir_mt = dir_mtime(repo_path);
+    let cached = cache.get(repo).filter(|c| c.indexed_at >= dir_mt);
+    let chunks = if let Some(c) = cached {
+        c.chunks.clone()
+    } else {
+        let ch = scan_repository(repo_path);
+        cache.insert(repo.to_string(), IndexCache { chunks: ch.clone(), indexed_at: now_millis() });
+        ch
+    };
+    let models_dir = repo_path.join(".code-search").join("models");
+    let model_path = assemble::model_path(&models_dir);
+    let model_exists = model_path.exists();
+
+    let bm25_results = search(query, &chunks);
+    let vector_results = if model_exists { rerank(bm25_results.clone(), query, &model_path) } else { bm25_results.clone() };
+    let commits = scan_git_commits(repo_path, 200);
+    let commit_texts = commits_to_searchable(&commits);
+    let bm25_commits = search_texts(query, &commit_texts);
+    let vector_commits = if model_exists { vector_search_texts(query, &commit_texts, &model_path) } else { vec![] };
+
+    format_all(query, repo_path, &bm25_results, &vector_results, &bm25_commits, &vector_commits)
+}
+
+fn handle_tools_call(id: Value, params: Value, cache: &mut HashMap<String, IndexCache>) -> Value {
+    let tool = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    if tool != "search" { return err_response(id, format!("Unknown tool: {}", tool)); }
+    let args = params.get("arguments").cloned().unwrap_or(json!({}));
+    let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if query.is_empty() { return err_response(id, "query is required".into()); }
+    let repo = args.get("repository_path").and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string());
+    let result = catch_unwind(AssertUnwindSafe(|| run_search_tool(&repo, &query, cache)));
+    match result {
+        Ok(text) => json!({ "jsonrpc": "2.0", "id": id, "result": { "content": [{ "type": "text", "text": text }] } }),
+        Err(_) => rpc_error(id, -32603, "Internal error: search panicked".into()),
+    }
 }
 
 pub fn run_mcp_server() {
@@ -49,12 +99,12 @@ pub fn run_mcp_server() {
                 "jsonrpc": "2.0", "id": id,
                 "result": { "tools": [{
                     "name": "search",
-                    "description": "Search a code repository. Returns 4 sections: BM25 code results, vector code results, most relevant commits (BM25), most relevant commits (vector).",
+                    "description": "Hybrid BM25+vector codebase search. 4 sections: BM25 code, vector code, BM25 commits, vector commits.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "repository_path": { "type": "string", "description": "Path to repository (defaults to current directory)" },
-                            "query": { "type": "string", "description": "Natural language search query" }
+                            "repository_path": { "type": "string", "description": "Path to repository (defaults to cwd)" },
+                            "query": { "type": "string", "description": "Natural language search query", "maxLength": 8192 }
                         },
                         "required": ["query"]
                     }
@@ -62,58 +112,19 @@ pub fn run_mcp_server() {
             }),
             "tools/call" => {
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
-                let tool = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                if tool != "search" {
-                    err_response(id, format!("Unknown tool: {}", tool))
-                } else {
-                    let args = params.get("arguments").cloned().unwrap_or(json!({}));
-                    let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                    if query.is_empty() {
-                        err_response(id, "query is required".into())
-                    } else {
-                        let repo = args.get("repository_path").and_then(|v| v.as_str())
-                            .map(String::from)
-                            .unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string());
-                        let repo_path = Path::new(&repo);
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-                        let dir_mt = dir_mtime(repo_path);
-                        let cached = cache.get(&repo).filter(|c| c.indexed_at >= dir_mt);
-                        let chunks = if let Some(c) = cached {
-                            c.chunks.clone()
-                        } else {
-                            let ch = scan_repository(repo_path);
-                            cache.insert(repo.clone(), IndexCache { chunks: ch.clone(), indexed_at: now });
-                            ch
-                        };
-                        let models_dir = repo_path.join(".code-search").join("models");
-                        let model_path = assemble::model_path(&models_dir);
-                        let model_exists = model_path.exists();
-
-                        let bm25_results = search(query, &chunks);
-                        let vector_results = if model_exists {
-                            rerank(bm25_results.clone(), query, &model_path)
-                        } else { bm25_results.clone() };
-
-                        let commits = scan_git_commits(repo_path, 200);
-                        let commit_texts = commits_to_searchable(&commits);
-                        let bm25_commits = search_texts(query, &commit_texts);
-                        let vector_commits = if model_exists {
-                            vector_search_texts(query, &commit_texts, &model_path)
-                        } else { vec![] };
-
-                        let text = format_all(query, repo_path, &bm25_results, &vector_results, &bm25_commits, &vector_commits);
-                        json!({ "jsonrpc": "2.0", "id": id, "result": { "content": [{ "type": "text", "text": text }] } })
-                    }
-                }
+                handle_tools_call(id, params, &mut cache)
             },
             "notifications/initialized" | "notifications/cancelled" => continue,
-            _ => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": "Method not found" } }),
+            _ => rpc_error(id, -32601, "Method not found".into()),
         };
 
         let _ = writeln!(out, "{}", response);
         let _ = out.flush();
     }
+}
+
+fn rpc_error(id: Value, code: i64, message: String) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
 fn err_response(id: Value, msg: String) -> Value {
@@ -129,10 +140,9 @@ fn format_code_results(results: &[crate::bm25::SearchResult], root: &Path) -> St
         let score_pct = (r.score * 100.0).round() as u64;
         out.push_str(&format!("{}. {}{}: {}-{}{} (score: {}%)\n",
             i + 1, r.chunk.file_path, total, r.chunk.line_start, r.chunk.line_end, ctx, score_pct));
-        if let Some(vs) = r.vector_score {
-            out.push_str(&format!("   BM25: {:.2}  Vector: {:.4}\n", r.bm25_raw, vs));
-        } else {
-            out.push_str(&format!("   BM25: {:.2}\n", r.bm25_raw));
+        match r.vector_score {
+            Some(vs) => out.push_str(&format!("   BM25: {:.2}  Vector: {:.4}\n", r.bm25_raw, vs)),
+            None => out.push_str(&format!("   BM25: {:.2}\n", r.bm25_raw)),
         }
         for line in r.chunk.content.split('\n').take(5) {
             out.push_str(&format!("   {}\n", line));
