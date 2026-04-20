@@ -11,12 +11,42 @@ path = "src/lib.rs"
 name = "rs-search"
 path = "src/main.rs"
 
+[features]
+default = ["vector", "perf"]
+vector = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
+perf = ["dep:mimalloc"]
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 regex = "1"
-candle-core = "0.10"
-candle-nn = "0.10"
-candle-transformers = "0.10"
-tokenizers = { version = "0.22", default-features = false }
 pdf-extract = "0.9"
+blake3 = "1"
+simsimd = "6"
+ignore = "0.4"
+arc-swap = "1"
+
+candle-core = { version = "0.10", optional = true }
+candle-nn = { version = "0.10", optional = true }
+candle-transformers = { version = "0.10", optional = true }
+tokenizers = { version = "0.22", default-features = false, optional = true }
+mimalloc = { version = "0.1", default-features = false, optional = true }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.25.1"
+ci = "github"
+installers = ["shell", "powershell"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+pr-run-mode = "plan"
