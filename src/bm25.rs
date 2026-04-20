@@ -2,6 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use regex::Regex;
 use crate::scanner::Chunk;
+use crate::tokenize::{add_word_tokens, tokenize as tok};
+
+pub use crate::tokenize::tokenize;
 
 static SYMBOL_RES: OnceLock<Vec<Regex>> = OnceLock::new();
 
@@ -32,54 +35,14 @@ pub struct SearchResult {
     pub vector_score: Option<f32>,
 }
 
-fn split_camel(word: &str) -> Vec<String> {
-    let chars: Vec<char> = word.chars().collect();
-    let mut tokens = Vec::new();
-    let mut cur = String::new();
-    for i in 0..chars.len() {
-        let c = chars[i];
-        let is_upper = c.is_uppercase();
-        let prev_lower = i > 0 && chars[i-1].is_lowercase();
-        let next_lower = i + 1 < chars.len() && chars[i+1].is_lowercase();
-        if is_upper && (prev_lower || next_lower) && !cur.is_empty() {
-            if cur.len() > 1 { tokens.push(cur.to_lowercase()); }
-            cur = c.to_string();
-        } else {
-            cur.push(c);
-        }
-    }
-    if cur.len() > 1 { tokens.push(cur.to_lowercase()); }
-    tokens
-}
-
-fn add_word_tokens(word: &str, out: &mut HashSet<String>) {
-    if word != word.to_lowercase() {
-        for t in split_camel(word) { if t.len() > 1 { out.insert(t); } }
-    }
-    for part in word.split(|c: char| c == '-' || c == '_' || c == '.') {
-        let pc: String = part.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
-        if pc.len() > 1 { out.insert(pc); }
-    }
-    let cleaned: String = word.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect::<String>().to_lowercase();
-    if cleaned.len() > 1 { out.insert(cleaned); }
-}
-
-pub fn tokenize(text: &str) -> Vec<String> {
-    let mut tokens: HashSet<String> = HashSet::new();
-    for word in text.split_whitespace() { add_word_tokens(word, &mut tokens); }
-    tokens.into_iter().collect()
-}
-
 fn tokenize_to_frequency(text: &str, index: &mut HashMap<String, HashSet<usize>>, chunk_idx: usize) -> HashMap<String, u32> {
     let mut freq: HashMap<String, u32> = HashMap::new();
     for word in text.split_whitespace() {
         let mut word_tokens: HashSet<String> = HashSet::new();
         add_word_tokens(word, &mut word_tokens);
-        for tok in word_tokens { *freq.entry(tok).or_insert(0) += 1; }
+        for t in word_tokens { *freq.entry(t).or_insert(0) += 1; }
     }
-    for token in freq.keys() {
-        index.entry(token.clone()).or_default().insert(chunk_idx);
-    }
+    for token in freq.keys() { index.entry(token.clone()).or_default().insert(chunk_idx); }
     freq
 }
 
@@ -95,41 +58,33 @@ fn extract_symbols(text: &str) -> HashSet<String> {
     symbols
 }
 
-fn is_code_file(path: &str) -> bool {
-    let code_exts = [".js",".ts",".jsx",".tsx",".py",".java",".go",".rs",".rb",".cs",".cpp",".c",".swift",".kt",".php"];
-    let lower = path.to_lowercase();
-    let ext = lower.rfind('.').map(|i| &lower[i..]).unwrap_or("");
-    code_exts.contains(&ext)
-}
-
 pub fn search_texts(query: &str, items: &[(String, String)]) -> Vec<(String, f64)> {
     if query.trim().is_empty() { return vec![]; }
     let mut index: HashMap<String, HashSet<usize>> = HashMap::new();
     let mut freqs: Vec<HashMap<String, u32>> = Vec::with_capacity(items.len());
     for (idx, (_, text)) in items.iter().enumerate() {
-        let freq = tokenize_to_frequency(text, &mut index, idx);
-        freqs.push(freq);
+        freqs.push(tokenize_to_frequency(text, &mut index, idx));
     }
     let n = items.len();
     let mut idf: HashMap<String, f64> = HashMap::new();
     for (token, doc_set) in &index {
         idf.insert(token.clone(), ((n + 1) as f64 / (doc_set.len() + 1) as f64).ln() + 1.0);
     }
-    let query_tokens = tokenize(query);
+    let query_tokens = tok(query);
     let mut candidates: HashSet<usize> = HashSet::new();
-    for token in &query_tokens { if let Some(set) = index.get(token) { candidates.extend(set); } }
+    for t in &query_tokens { if let Some(s) = index.get(t) { candidates.extend(s); } }
     let mut scores: Vec<(usize, f64)> = candidates.into_iter().filter_map(|idx| {
         let freq = &freqs[idx];
         let text_lower = items[idx].1.to_lowercase();
         let query_lower = query.to_lowercase();
         let mut score = 0.0f64;
         if query_tokens.len() > 1 && text_lower.contains(&query_lower) { score += 30.0; }
-        for token in &query_tokens {
-            if let Some(doc_set) = index.get(token) {
-                if doc_set.contains(&idx) {
-                    let tf = (*freq.get(token).unwrap_or(&1)).min(5) as f64;
-                    let lb = if token.len() > 4 { 1.5 } else { 1.0 };
-                    score += lb * tf * *idf.get(token).unwrap_or(&1.0);
+        for t in &query_tokens {
+            if let Some(ds) = index.get(t) {
+                if ds.contains(&idx) {
+                    let tf = (*freq.get(t).unwrap_or(&1)).min(5) as f64;
+                    let lb = if t.len() > 4 { 1.5 } else { 1.0 };
+                    score += lb * tf * *idf.get(t).unwrap_or(&1.0);
                 }
             }
         }
@@ -140,71 +95,84 @@ pub fn search_texts(query: &str, items: &[(String, String)]) -> Vec<(String, f64
     scores.iter().map(|(idx, raw)| (items[*idx].0.clone(), raw / max)).collect()
 }
 
-pub fn search(query: &str, chunks: &[Chunk]) -> Vec<SearchResult> {
-    if query.trim().is_empty() { return vec![]; }
-
+fn build_index(chunks: &[Chunk]) -> (HashMap<String, HashSet<usize>>, Vec<ChunkMeta>) {
     let mut index: HashMap<String, HashSet<usize>> = HashMap::new();
-    let mut meta_list: Vec<ChunkMeta> = Vec::with_capacity(chunks.len());
-
-    for (idx, chunk) in chunks.iter().enumerate() {
-        let frequency = tokenize_to_frequency(&chunk.content, &mut index, idx);
-        let file_name_tokens: HashSet<String> = tokenize(&chunk.file_path).into_iter().collect();
-        let symbols = extract_symbols(&chunk.content);
-        meta_list.push(ChunkMeta {
+    let mut meta: Vec<ChunkMeta> = Vec::with_capacity(chunks.len());
+    for (idx, c) in chunks.iter().enumerate() {
+        let frequency = tokenize_to_frequency(&c.content, &mut index, idx);
+        let file_name_tokens: HashSet<String> = tok(&c.file_path).into_iter().collect();
+        let symbols = extract_symbols(&c.content);
+        meta.push(ChunkMeta {
             file_name_tokens, symbols, frequency,
-            is_code: is_code_file(&chunk.file_path),
-            content_lower: chunk.content.to_lowercase(),
+            is_code: crate::ignore::is_code_file(&c.file_path),
+            content_lower: c.content.to_lowercase(),
         });
     }
+    (index, meta)
+}
 
-    let n = chunks.len();
+fn compute_idf(index: &HashMap<String, HashSet<usize>>, n: usize) -> HashMap<String, f64> {
     let mut idf: HashMap<String, f64> = HashMap::new();
-    for (token, doc_set) in &index {
-        idf.insert(token.clone(), ((n + 1) as f64 / (doc_set.len() + 1) as f64).ln() + 1.0);
+    for (t, ds) in index {
+        idf.insert(t.clone(), ((n + 1) as f64 / (ds.len() + 1) as f64).ln() + 1.0);
     }
+    idf
+}
 
-    let query_tokens = tokenize(query);
+fn prune_candidates(
+    candidates: HashSet<usize>,
+    query_tokens: &[String],
+    index: &HashMap<String, HashSet<usize>>,
+    idf: &HashMap<String, f64>,
+) -> Vec<usize> {
+    if candidates.len() <= 500 { return candidates.into_iter().collect(); }
+    let mut ranked: Vec<usize> = candidates.into_iter().collect();
+    ranked.sort_by(|&a, &b| {
+        let sum = |i: usize| -> f64 {
+            query_tokens.iter().filter_map(|t| {
+                index.get(t).filter(|s| s.contains(&i)).map(|_| *idf.get(t).unwrap_or(&1.0))
+            }).sum()
+        };
+        sum(b).partial_cmp(&sum(a)).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    ranked.truncate(500);
+    ranked
+}
+
+pub fn search(query: &str, chunks: &[Chunk]) -> Vec<SearchResult> {
+    if query.trim().is_empty() { return vec![]; }
+    let (index, meta_list) = build_index(chunks);
+    let n = chunks.len();
+    let idf = compute_idf(&index, n);
+
+    let query_tokens = tok(query);
     let query_symbols = extract_symbols(query);
     let query_lower = query.to_lowercase();
 
     let mut candidates: HashSet<usize> = HashSet::new();
-    for token in &query_tokens { if let Some(set) = index.get(token) { candidates.extend(set); } }
-    for sym in &query_symbols { if let Some(set) = index.get(sym) { candidates.extend(set); } }
+    for t in &query_tokens { if let Some(s) = index.get(t) { candidates.extend(s); } }
+    for s in &query_symbols { if let Some(ds) = index.get(s) { candidates.extend(ds); } }
 
-    let scoring_candidates: Vec<usize> = if candidates.len() > 500 {
-        let mut ranked: Vec<usize> = candidates.into_iter().collect();
-        ranked.sort_by(|&a, &b| {
-            let sum = |i: usize| -> f64 {
-                query_tokens.iter().filter_map(|t| {
-                    index.get(t).filter(|s| s.contains(&i)).map(|_| *idf.get(t).unwrap_or(&1.0))
-                }).sum()
-            };
-            sum(b).partial_cmp(&sum(a)).unwrap_or(std::cmp::Ordering::Equal)
-        });
-        ranked.truncate(500);
-        ranked
-    } else {
-        candidates.into_iter().collect()
-    };
+    let scoring = prune_candidates(candidates, &query_tokens, &index, &idf);
 
     let mut scores: Vec<(usize, f64)> = Vec::new();
-    for idx in scoring_candidates {
-        let meta = &meta_list[idx];
+    for idx in scoring {
+        let m = &meta_list[idx];
         let mut score = 0.0f64;
-        if query_tokens.len() > 1 && meta.content_lower.contains(&query_lower) { score += 30.0; }
-        for sym in &query_symbols { if meta.symbols.contains(sym) { score += 10.0; } }
-        let file_matches = query_tokens.iter().filter(|t| meta.file_name_tokens.contains(*t)).count();
+        if query_tokens.len() > 1 && m.content_lower.contains(&query_lower) { score += 30.0; }
+        for sym in &query_symbols { if m.symbols.contains(sym) { score += 10.0; } }
+        let file_matches = query_tokens.iter().filter(|t| m.file_name_tokens.contains(*t)).count();
         score += file_matches as f64 * 10.0;
-        for token in &query_tokens {
-            if let Some(doc_set) = index.get(token) {
-                if doc_set.contains(&idx) {
-                    let tf = (*meta.frequency.get(token).unwrap_or(&1)).min(5) as f64;
-                    let length_boost = if token.len() > 4 { 1.5 } else { 1.0 };
-                    score += length_boost * tf * *idf.get(token).unwrap_or(&1.0);
+        for t in &query_tokens {
+            if let Some(ds) = index.get(t) {
+                if ds.contains(&idx) {
+                    let tf = (*m.frequency.get(t).unwrap_or(&1)).min(5) as f64;
+                    let lb = if t.len() > 4 { 1.5 } else { 1.0 };
+                    score += lb * tf * *idf.get(t).unwrap_or(&1.0);
                 }
             }
         }
-        if meta.is_code { score *= 1.2; }
+        if m.is_code { score *= 1.2; }
         if score > 0.0 { scores.push((idx, score)); }
     }
 
