@@ -36,15 +36,53 @@ candle-core 0.10.2 uses `usize::is_multiple_of()` (tracking issue #128101), an u
 - **Type**: BERT WordPiece (not BPE)
 - **Why separate**: nomic-embed-text-v1.5 requires WordPiece; GGUF-embedded tokenizer only supports BPE
 
-### Hybrid Scoring
-```
-0.5 * bm25_normalized + 0.5 * (cosine_sim + 1.0) / 2.0
-```
-- Combines lexical (BM25) + semantic (cosine similarity) scores
-- Both normalized to [0, 1]
-- Reranks BM25 results with vector similarity
+### Hybrid Scoring — Reciprocal Rank Fusion
+Fusion lives in `src/fusion.rs`. RRF with `k=60` merges BM25 and vector rankings; BM25 gets a `1.5×` weight when `looks_like_identifier(query)` is true (snake_case, kebab-case, dotted, or camelCase without spaces). The final score is normalized to `[0, 1]`.
 
 ### Lazy Initialization
 - Embedder initialized via `OnceLock<Result<Embedder, String>>`
 - Model loaded on first query, not at startup
 - Stored in singleton for reuse across requests
+
+### SIMD Vector Ops
+`embed::cosine` uses `simsimd::SpatialSimilarity::cosine` when SSE is available, with a scalar fallback. Expect 5–20× speedup over hand-rolled scalar math on AVX2/AVX-512/NEON hosts.
+
+### Content-Addressable Embedding Cache
+`src/embed_cache.rs` keys BLAKE3(`model_tag || dim || text`) → `f32` vector, in-memory (Mutex<HashMap>) + on-disk at `.code-search/emb-cache/<hex>.bin`. Skips re-embedding unchanged chunks across runs. Dim is part of the key so MRL truncation produces a separate cache lane.
+
+### Matryoshka Truncation
+Set `RS_SEARCH_DIM=256` (or any value less than full dim) and the embedder slices the vector and renormalizes. No retraining needed — nomic-embed-text-v1.5 is MRL-trained.
+
+### Embedder Prompt Prefixes
+Defaults are nomic's `search_query: ` / `search_document: `. Override via `RS_SEARCH_QUERY_PREFIX` and `RS_SEARCH_DOC_PREFIX` for CodeRankEmbed (`Represent this query for searching relevant code: `) or other embedders.
+
+## Feature Gates
+
+- `default = ["vector", "perf"]`
+- `vector` — gates `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers`. Disabling shrinks the binary to pure-Rust BM25 + RRF + PDF scan.
+- `perf` — gates `mimalloc` as `#[global_allocator]`. Turn off for musl-only builds or when another allocator is preferred.
+
+## Subcommands
+
+- `rs-search <query...>` — one-shot search (legacy positional).
+- `rs-search search <query...>` — explicit subcommand.
+- `rs-search serve` — MCP stdio server (also the default when no args given).
+- `rs-search explain <query...>` — per-token IDF, doc frequency, RRF weights, matched tokens per result (`src/explain.rs`).
+
+## MCP Panic Boundary
+
+`tools/call` is wrapped in `std::panic::catch_unwind`. A handler panic emits a JSON-RPC `-32603` error instead of killing the session. Query input is capped via `inputSchema.properties.query.maxLength=8192`.
+
+## Scanner
+
+`src/scanner.rs` uses `ignore::WalkBuilder` (ripgrep/fd's crate) with `.gitignore`, `.git/info/exclude`, global gitignore, and `.codesearchignore` all respected out of the box. The custom `IGNORED_DIRS` list still guards against vendored caches even when no ignore file exists.
+
+## Eval Harness
+
+`src/eval.rs` exposes `ndcg_at_k`, `mrr`, `recall_at_k`, `precision_at_k` plus an `EvalReport` aggregator. Plug in BEIR/CoIR qrels to gate NDCG@10 regressions in CI.
+
+## Release Tooling
+
+- `release-plz.toml` — changelog + version-bump PRs driven by conventional commits.
+- `[workspace.metadata.dist]` in `Cargo.toml` — cargo-dist cross-platform artifacts.
+- `.github/workflows/release-plz.yml` — opens release PRs on pushes to `main`.
