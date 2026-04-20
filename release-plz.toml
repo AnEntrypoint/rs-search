@@ -1,0 +1,19 @@
+[workspace]
+changelog_update = true
+git_release_enable = true
+release_always = false
+semver_check = true
+publish = false
+
+[changelog]
+header = "# Changelog\n\nAll notable changes to this project will be documented in this file.\n"
+commit_parsers = [
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Bug Fixes" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Refactor" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^test", group = "Tests" },
+    { message = "^ci", group = "CI" },
+    { message = "^chore", skip = true },
+]
