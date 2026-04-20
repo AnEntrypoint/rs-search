@@ -1,4 +1,5 @@
 /target
 .code-search/
+.codeinsight
 .codeinsight/
 .gm-stop-verified
