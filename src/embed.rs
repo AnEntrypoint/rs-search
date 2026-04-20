@@ -1,128 +1,190 @@
+#[cfg(feature = "vector")]
 use std::collections::HashMap;
+#[cfg(feature = "vector")]
 use std::io::BufReader;
 use std::path::Path;
+#[cfg(feature = "vector")]
 use std::sync::OnceLock;
+#[cfg(feature = "vector")]
 use candle_core::{Device, DType, Tensor};
+#[cfg(feature = "vector")]
 use candle_core::quantized::gguf_file;
+#[cfg(feature = "vector")]
 use candle_nn::VarBuilder;
+#[cfg(feature = "vector")]
 use candle_transformers::models::nomic_bert::{Config, NomicBertModel, mean_pooling, l2_normalize};
+#[cfg(feature = "vector")]
 use tokenizers::Tokenizer;
 use crate::bm25::SearchResult;
+#[cfg(feature = "vector")]
+use crate::embed_cache::EmbedCache;
 
+#[cfg(feature = "vector")]
+const MODEL_TAG: &str = "nomic-embed-text-v1.5";
+
+pub fn query_prefix() -> String {
+    std::env::var("RS_SEARCH_QUERY_PREFIX")
+        .unwrap_or_else(|_| "search_query: ".to_string())
+}
+
+pub fn doc_prefix() -> String {
+    std::env::var("RS_SEARCH_DOC_PREFIX")
+        .unwrap_or_else(|_| "search_document: ".to_string())
+}
+
+pub fn target_dim() -> Option<usize> {
+    std::env::var("RS_SEARCH_DIM").ok().and_then(|s| s.parse::<usize>().ok())
+}
+
+pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    #[cfg(target_feature = "sse")]
+    {
+        use simsimd::SpatialSimilarity;
+        if let Some(d) = f32::cosine(a, b) { return 1.0 - d as f32; }
+    }
+    let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+    let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if na <= 0.0 || nb <= 0.0 { return 0.0; }
+    dot / (na * nb)
+}
+
+pub fn truncate_mrl(vec: &[f32], dim: Option<usize>) -> Vec<f32> {
+    let d = match dim { Some(d) if d > 0 && d < vec.len() => d, _ => return vec.to_vec() };
+    let slice = &vec[..d];
+    let norm: f32 = slice.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm <= 0.0 { return slice.to_vec(); }
+    slice.iter().map(|x| x / norm).collect()
+}
+
+#[cfg(feature = "vector")]
 struct Embedder {
     model: NomicBertModel,
     tokenizer: Tokenizer,
     device: Device,
 }
 
+#[cfg(feature = "vector")]
 static EMBEDDER: OnceLock<Result<Embedder, String>> = OnceLock::new();
 
+#[cfg(feature = "vector")]
 fn load(model_path: &Path) -> Result<Embedder, String> {
     let device = Device::Cpu;
-    let f = std::fs::File::open(model_path)
-        .map_err(|e| format!("open model: {}", e))?;
+    let f = std::fs::File::open(model_path).map_err(|e| format!("open model: {}", e))?;
     let mut reader = BufReader::new(f);
-    let content = gguf_file::Content::read(&mut reader)
-        .map_err(|e| format!("read gguf: {}", e))?;
+    let content = gguf_file::Content::read(&mut reader).map_err(|e| format!("read gguf: {}", e))?;
     let mut tensors: HashMap<String, Tensor> = HashMap::new();
     for name in content.tensor_infos.keys().cloned().collect::<Vec<_>>() {
-        let qt = content.tensor(&mut reader, &name, &device)
-            .map_err(|e| format!("tensor {}: {}", name, e))?;
-        let t = qt.dequantize(&device)
-            .map_err(|e| format!("dequantize {}: {}", name, e))?;
+        let qt = content.tensor(&mut reader, &name, &device).map_err(|e| format!("tensor {}: {}", name, e))?;
+        let t = qt.dequantize(&device).map_err(|e| format!("dequantize {}: {}", name, e))?;
         tensors.insert(name, t);
     }
     let vb = VarBuilder::from_tensors(tensors, DType::F32, &device);
-    let model = NomicBertModel::load(vb, &Config::default())
-        .map_err(|e| format!("load model: {}", e))?;
+    let model = NomicBertModel::load(vb, &Config::default()).map_err(|e| format!("load model: {}", e))?;
     let tokenizer = Tokenizer::from_bytes(include_bytes!("../models/tokenizer.json"))
         .map_err(|e| format!("load tokenizer: {}", e))?;
     Ok(Embedder { model, tokenizer, device })
 }
 
-fn embed(embedder: &Embedder, text: &str) -> Result<Vec<f32>, String> {
-    let enc = embedder.tokenizer.encode(text, true)
-        .map_err(|e| format!("encode: {}", e))?;
+#[cfg(feature = "vector")]
+fn embed_raw(embedder: &Embedder, text: &str) -> Result<Vec<f32>, String> {
+    let enc = embedder.tokenizer.encode(text, true).map_err(|e| format!("encode: {}", e))?;
     let ids: Vec<u32> = enc.get_ids().to_vec();
     let mask: Vec<u32> = enc.get_attention_mask().to_vec();
     let len = ids.len();
-    let input_ids = Tensor::from_vec(ids, (1, len), &embedder.device)
-        .map_err(|e| format!("input_ids tensor: {}", e))?;
-    let attn_mask = Tensor::from_vec(mask, (1, len), &embedder.device)
-        .map_err(|e| format!("attn_mask tensor: {}", e))?;
-    let hidden = embedder.model.forward(&input_ids, None, Some(&attn_mask))
-        .map_err(|e| format!("forward: {}", e))?;
-    let pooled = mean_pooling(&hidden, &attn_mask)
-        .map_err(|e| format!("mean_pool: {}", e))?;
-    let normed = l2_normalize(&pooled)
-        .map_err(|e| format!("l2_norm: {}", e))?;
-    normed.squeeze(0)
-        .map_err(|e| format!("squeeze: {}", e))?
-        .to_vec1::<f32>()
-        .map_err(|e| format!("to_vec: {}", e))
+    let input_ids = Tensor::from_vec(ids, (1, len), &embedder.device).map_err(|e| format!("input_ids: {}", e))?;
+    let attn_mask = Tensor::from_vec(mask, (1, len), &embedder.device).map_err(|e| format!("attn_mask: {}", e))?;
+    let hidden = embedder.model.forward(&input_ids, None, Some(&attn_mask)).map_err(|e| format!("forward: {}", e))?;
+    let pooled = mean_pooling(&hidden, &attn_mask).map_err(|e| format!("mean_pool: {}", e))?;
+    let normed = l2_normalize(&pooled).map_err(|e| format!("l2_norm: {}", e))?;
+    normed.squeeze(0).map_err(|e| format!("squeeze: {}", e))?
+        .to_vec1::<f32>().map_err(|e| format!("to_vec: {}", e))
 }
 
-fn cosine(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+#[cfg(feature = "vector")]
+fn embed_with_cache(embedder: &Embedder, text: &str, cache: Option<&EmbedCache>, dim: Option<usize>) -> Result<Vec<f32>, String> {
+    let effective_dim = dim.unwrap_or(0);
+    if let Some(c) = cache {
+        let key = EmbedCache::key(MODEL_TAG, effective_dim, text);
+        if let Some(v) = c.get(&key) { return Ok(v); }
+        let raw = embed_raw(embedder, text)?;
+        let out = truncate_mrl(&raw, dim);
+        c.put(&key, &out);
+        return Ok(out);
+    }
+    let raw = embed_raw(embedder, text)?;
+    Ok(truncate_mrl(&raw, dim))
 }
 
+#[cfg(feature = "vector")]
 pub fn embed_query(query: &str, model_path: &Path) -> Option<Vec<f32>> {
-    let embedder = EMBEDDER.get_or_init(|| load(model_path));
-    let embedder = embedder.as_ref().ok()?;
-    let q_text = format!("search_query: {}", query);
-    embed(embedder, &q_text).ok()
+    let embedder = EMBEDDER.get_or_init(|| load(model_path)).as_ref().ok()?;
+    let text = format!("{}{}", query_prefix(), query);
+    embed_with_cache(embedder, &text, None, target_dim()).ok()
 }
 
+#[cfg(not(feature = "vector"))]
+pub fn embed_query(_query: &str, _model_path: &Path) -> Option<Vec<f32>> { None }
+
+#[cfg(feature = "vector")]
 pub fn vector_search_texts(query: &str, items: &[(String, String)], model_path: &Path) -> Vec<(String, f32)> {
-    let embedder = EMBEDDER.get_or_init(|| load(model_path));
-    let embedder = match embedder {
+    let embedder = match EMBEDDER.get_or_init(|| load(model_path)) {
         Ok(e) => e,
         Err(e) => { eprintln!("vector search unavailable: {}", e); return vec![]; }
     };
-    let q_text = format!("search_query: {}", query);
-    let q_emb = match embed(embedder, &q_text) {
+    let dim = target_dim();
+    let cache = model_path.parent().and_then(|p| p.parent()).map(EmbedCache::new);
+    let q_text = format!("{}{}", query_prefix(), query);
+    let q_emb = match embed_with_cache(embedder, &q_text, cache.as_ref(), dim) {
         Ok(v) => v,
         Err(e) => { eprintln!("embed query: {}", e); return vec![]; }
     };
     let mut scored: Vec<(String, f32)> = items.iter().filter_map(|(id, text)| {
-        let doc_text = format!("search_document: {}", &text[..text.len().min(1024)]);
-        match embed(embedder, &doc_text) {
-            Ok(d_emb) => Some((id.clone(), cosine(&q_emb, &d_emb))),
-            Err(_) => None,
-        }
+        let doc_text = format!("{}{}", doc_prefix(), &text[..text.len().min(1024)]);
+        embed_with_cache(embedder, &doc_text, cache.as_ref(), dim).ok()
+            .map(|d| (id.clone(), cosine(&q_emb, &d)))
     }).collect();
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     scored
 }
 
+#[cfg(not(feature = "vector"))]
+pub fn vector_search_texts(_query: &str, _items: &[(String, String)], _model_path: &Path) -> Vec<(String, f32)> { vec![] }
+
+#[cfg(feature = "vector")]
 pub fn rerank(mut results: Vec<SearchResult>, query: &str, model_path: &Path) -> Vec<SearchResult> {
-    let embedder = EMBEDDER.get_or_init(|| load(model_path));
-    let embedder = match embedder {
+    let embedder = match EMBEDDER.get_or_init(|| load(model_path)) {
         Ok(e) => e,
-        Err(e) => {
-            eprintln!("vector search unavailable: {}", e);
-            return results;
-        }
+        Err(e) => { eprintln!("vector search unavailable: {}", e); return results; }
     };
-    let q_text = format!("search_query: {}", query);
-    let q_emb = match embed(embedder, &q_text) {
+    let dim = target_dim();
+    let cache = model_path.parent().and_then(|p| p.parent()).map(EmbedCache::new);
+    let q_text = format!("{}{}", query_prefix(), query);
+    let q_emb = match embed_with_cache(embedder, &q_text, cache.as_ref(), dim) {
         Ok(v) => v,
         Err(e) => { eprintln!("embed query: {}", e); return results; }
     };
-    let max_bm25 = results.iter().map(|r| r.bm25_raw).fold(0f64, f64::max).max(1e-9);
-    for r in &mut results {
-        let doc_text = format!("search_document: {}", &r.chunk.content[..r.chunk.content.len().min(512)]);
-        match embed(embedder, &doc_text) {
-            Ok(d_emb) => {
-                let sim = cosine(&q_emb, &d_emb);
-                r.vector_score = Some(sim);
-                let bm25_norm = (r.bm25_raw / max_bm25) as f32;
-                let vec_norm = (sim + 1.0) / 2.0;
-                r.score = (0.5 * bm25_norm + 0.5 * vec_norm) as f64;
-            }
-            Err(e) => eprintln!("embed doc: {}", e),
+    let bm25_ranked: Vec<String> = results.iter().enumerate().map(|(i, _)| i.to_string()).collect();
+    let mut vec_scores: Vec<(usize, f32)> = Vec::with_capacity(results.len());
+    for (i, r) in results.iter().enumerate() {
+        let doc_text = format!("{}{}", doc_prefix(), &r.chunk.content[..r.chunk.content.len().min(1024)]);
+        if let Ok(d) = embed_with_cache(embedder, &doc_text, cache.as_ref(), dim) {
+            vec_scores.push((i, cosine(&q_emb, &d)));
         }
+    }
+    for &(i, s) in &vec_scores { results[i].vector_score = Some(s); }
+    let mut sorted = vec_scores.clone();
+    sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let vec_ranked: Vec<String> = sorted.iter().map(|(i, _)| i.to_string()).collect();
+    let fused = crate::fusion::fuse(&bm25_ranked, &vec_ranked, query);
+    let fused = crate::fusion::normalize_scores(&fused);
+    let order: HashMap<String, f64> = fused.iter().cloned().collect();
+    for (i, r) in results.iter_mut().enumerate() {
+        r.score = *order.get(&i.to_string()).unwrap_or(&0.0);
     }
     results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     results
 }
+
+#[cfg(not(feature = "vector"))]
+pub fn rerank(results: Vec<SearchResult>, _query: &str, _model_path: &Path) -> Vec<SearchResult> { results }
