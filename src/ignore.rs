@@ -99,8 +99,20 @@ pub fn is_binary_file(path: &str) -> bool {
     BINARY_EXTENSIONS.contains(&ext)
 }
 
+static IGNORED_DIR_SUFFIXES: &[&str] = &[
+    "-browser-profile","-chrome-profile","-firefox-profile","-edge-profile",
+    ".egg-info",".dist-info",
+];
+
+static IGNORED_DIR_PREFIXES: &[&str] = &[
+    "chromium-","chrome-user-data-","puppeteer-","playwright-",
+];
+
 pub fn should_ignore_dir(name: &str) -> bool {
-    IGNORED_DIRS.contains(&name)
+    if IGNORED_DIRS.contains(&name) { return true; }
+    for s in IGNORED_DIR_SUFFIXES { if name.ends_with(s) { return true; } }
+    for p in IGNORED_DIR_PREFIXES { if name.starts_with(p) { return true; } }
+    false
 }
 
 fn parse_ignore_file(content: &str) -> HashSet<String> {
