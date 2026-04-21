@@ -12,15 +12,16 @@ name = "rs-search"
 path = "src/main.rs"
 
 [features]
-default = ["vector", "perf"]
+default = ["vector", "perf", "pdf"]
 vector = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
 perf = ["dep:mimalloc"]
+pdf = ["dep:pdf-extract"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
 regex = "1"
-pdf-extract = "0.9"
+pdf-extract = { version = "0.9", optional = true }
 blake3 = "1"
 simsimd = "6"
 ignore = "0.4"
