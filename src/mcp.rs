@@ -7,7 +7,6 @@ use crate::scanner::scan_repository;
 use crate::bm25::{search, search_texts};
 use crate::embed::{rerank, vector_search_texts};
 use crate::git::{scan_git_commits, commits_to_searchable};
-use crate::assemble;
 use crate::context::{find_enclosing_context, get_file_total_lines};
 
 struct IndexCache {
@@ -42,16 +41,13 @@ fn run_search_tool(
         cache.insert(repo.to_string(), IndexCache { chunks: ch.clone(), indexed_at: now_millis() });
         ch
     };
-    let models_dir = repo_path.join(".code-search").join("models");
-    let model_path = assemble::model_path(&models_dir);
-    let model_exists = model_path.exists();
-
+    let placeholder = Path::new("");
     let bm25_results = search(query, &chunks);
-    let vector_results = if model_exists { rerank(bm25_results.clone(), query, &model_path) } else { bm25_results.clone() };
+    let vector_results = rerank(bm25_results.clone(), query, placeholder);
     let commits = scan_git_commits(repo_path, 200);
     let commit_texts = commits_to_searchable(&commits);
     let bm25_commits = search_texts(query, &commit_texts);
-    let vector_commits = if model_exists { vector_search_texts(query, &commit_texts, &model_path) } else { vec![] };
+    let vector_commits = vector_search_texts(query, &commit_texts, placeholder);
 
     format_all(query, repo_path, &bm25_results, &vector_results, &bm25_commits, &vector_commits)
 }
