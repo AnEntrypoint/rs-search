@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 use ignore::WalkBuilder;
 use crate::ignore::{is_code_file, is_binary_file, should_ignore_dir};
+#[cfg(feature = "pdf")]
 use crate::pdf::{is_pdf, pdf_chunks};
 
 #[derive(Clone)]
@@ -87,9 +88,12 @@ pub fn scan_repository(root: &Path) -> Vec<Chunk> {
         let mtime = meta.modified().ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs()).unwrap_or(0);
-        if is_pdf(&rel) {
-            chunks.extend(pdf_chunks(&rel, full, mtime, db));
-            continue;
+        #[cfg(feature = "pdf")]
+        {
+            if is_pdf(&rel) {
+                chunks.extend(pdf_chunks(&rel, full, mtime, db));
+                continue;
+            }
         }
         let content = match fs::read_to_string(full) { Ok(c) => c, Err(_) => continue };
         chunk_text(&rel, &content, mtime, &mut chunks);
