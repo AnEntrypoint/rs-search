@@ -1,7 +1,7 @@
 #[cfg(feature = "vector")]
 use std::collections::HashMap;
 #[cfg(feature = "vector")]
-use std::io::BufReader;
+use std::io::Cursor;
 use std::path::Path;
 #[cfg(feature = "vector")]
 use std::sync::OnceLock;
@@ -21,6 +21,16 @@ use crate::embed_cache::EmbedCache;
 
 #[cfg(feature = "vector")]
 const MODEL_TAG: &str = "nomic-embed-text-v1.5";
+
+#[cfg(feature = "vector")]
+const MODEL_PARTS: [&[u8]; 6] = [
+    include_bytes!("../models/nomic-embed-text-v1.5.Q4_K_M.gguf.part1"),
+    include_bytes!("../models/nomic-embed-text-v1.5.Q4_K_M.gguf.part2"),
+    include_bytes!("../models/nomic-embed-text-v1.5.Q4_K_M.gguf.part3"),
+    include_bytes!("../models/nomic-embed-text-v1.5.Q4_K_M.gguf.part4"),
+    include_bytes!("../models/nomic-embed-text-v1.5.Q4_K_M.gguf.part5"),
+    include_bytes!("../models/nomic-embed-text-v1.5.Q4_K_M.gguf.part6"),
+];
 
 pub fn query_prefix() -> String {
     std::env::var("RS_SEARCH_QUERY_PREFIX")
@@ -68,10 +78,12 @@ struct Embedder {
 static EMBEDDER: OnceLock<Result<Embedder, String>> = OnceLock::new();
 
 #[cfg(feature = "vector")]
-fn load(model_path: &Path) -> Result<Embedder, String> {
+fn load() -> Result<Embedder, String> {
     let device = Device::Cpu;
-    let f = std::fs::File::open(model_path).map_err(|e| format!("open model: {}", e))?;
-    let mut reader = BufReader::new(f);
+    let total: usize = MODEL_PARTS.iter().map(|p| p.len()).sum();
+    let mut blob = Vec::with_capacity(total);
+    for p in MODEL_PARTS { blob.extend_from_slice(p); }
+    let mut reader = Cursor::new(blob);
     let content = gguf_file::Content::read(&mut reader).map_err(|e| format!("read gguf: {}", e))?;
     let mut tensors: HashMap<String, Tensor> = HashMap::new();
     for name in content.tensor_infos.keys().cloned().collect::<Vec<_>>() {
@@ -117,8 +129,15 @@ fn embed_with_cache(embedder: &Embedder, text: &str, cache: Option<&EmbedCache>,
 }
 
 #[cfg(feature = "vector")]
-pub fn embed_query(query: &str, model_path: &Path) -> Option<Vec<f32>> {
-    let embedder = EMBEDDER.get_or_init(|| load(model_path)).as_ref().ok()?;
+fn cache_for(root: &Path) -> Option<EmbedCache> {
+    let p = root.join(".code-search");
+    if !p.exists() { let _ = std::fs::create_dir_all(&p); }
+    Some(EmbedCache::new(p))
+}
+
+#[cfg(feature = "vector")]
+pub fn embed_query(query: &str, _model_path: &Path) -> Option<Vec<f32>> {
+    let embedder = EMBEDDER.get_or_init(load).as_ref().ok()?;
     let text = format!("{}{}", query_prefix(), query);
     embed_with_cache(embedder, &text, None, target_dim()).ok()
 }
@@ -127,18 +146,12 @@ pub fn embed_query(query: &str, model_path: &Path) -> Option<Vec<f32>> {
 pub fn embed_query(_query: &str, _model_path: &Path) -> Option<Vec<f32>> { None }
 
 #[cfg(feature = "vector")]
-pub fn vector_search_texts(query: &str, items: &[(String, String)], model_path: &Path) -> Vec<(String, f32)> {
-    let embedder = match EMBEDDER.get_or_init(|| load(model_path)) {
-        Ok(e) => e,
-        Err(e) => { eprintln!("vector search unavailable: {}", e); return vec![]; }
-    };
+pub fn vector_search_texts(query: &str, items: &[(String, String)], _model_path: &Path) -> Vec<(String, f32)> {
+    let embedder = EMBEDDER.get_or_init(load).as_ref().expect("embedded GGUF must load — rs-search binary is broken if this fails");
     let dim = target_dim();
-    let cache = model_path.parent().and_then(|p| p.parent()).map(EmbedCache::new);
+    let cache = cache_for(&std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()));
     let q_text = format!("{}{}", query_prefix(), query);
-    let q_emb = match embed_with_cache(embedder, &q_text, cache.as_ref(), dim) {
-        Ok(v) => v,
-        Err(e) => { eprintln!("embed query: {}", e); return vec![]; }
-    };
+    let q_emb = embed_with_cache(embedder, &q_text, cache.as_ref(), dim).expect("embed query");
     let mut scored: Vec<(String, f32)> = items.iter().filter_map(|(id, text)| {
         let doc_text = format!("{}{}", doc_prefix(), &text[..text.len().min(1024)]);
         embed_with_cache(embedder, &doc_text, cache.as_ref(), dim).ok()
@@ -152,18 +165,12 @@ pub fn vector_search_texts(query: &str, items: &[(String, String)], model_path: 
 pub fn vector_search_texts(_query: &str, _items: &[(String, String)], _model_path: &Path) -> Vec<(String, f32)> { vec![] }
 
 #[cfg(feature = "vector")]
-pub fn rerank(mut results: Vec<SearchResult>, query: &str, model_path: &Path) -> Vec<SearchResult> {
-    let embedder = match EMBEDDER.get_or_init(|| load(model_path)) {
-        Ok(e) => e,
-        Err(e) => { eprintln!("vector search unavailable: {}", e); return results; }
-    };
+pub fn rerank(mut results: Vec<SearchResult>, query: &str, _model_path: &Path) -> Vec<SearchResult> {
+    let embedder = EMBEDDER.get_or_init(load).as_ref().expect("embedded GGUF must load — rs-search binary is broken if this fails");
     let dim = target_dim();
-    let cache = model_path.parent().and_then(|p| p.parent()).map(EmbedCache::new);
+    let cache = cache_for(&std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()));
     let q_text = format!("{}{}", query_prefix(), query);
-    let q_emb = match embed_with_cache(embedder, &q_text, cache.as_ref(), dim) {
-        Ok(v) => v,
-        Err(e) => { eprintln!("embed query: {}", e); return results; }
-    };
+    let q_emb = embed_with_cache(embedder, &q_text, cache.as_ref(), dim).expect("embed query");
     let bm25_ranked: Vec<String> = results.iter().enumerate().map(|(i, _)| i.to_string()).collect();
     let mut vec_scores: Vec<(usize, f32)> = Vec::with_capacity(results.len());
     for (i, r) in results.iter().enumerate() {
