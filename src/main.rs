@@ -1,4 +1,4 @@
-use rs_search::{assemble, bm25, context, embed, explain, git, mcp, mtime_cache, scanner};
+use rs_search::{bm25, context, embed, explain, git, mcp, mtime_cache, scanner};
 use std::fs;
 use std::path::Path;
 use clap::{Parser, Subcommand};
@@ -69,10 +69,6 @@ fn run_full_search(query: &str, root: &Path) {
 
     let db_path = root.join(".code-search");
     let _ = fs::create_dir_all(&db_path);
-    let models_dir = db_path.join("models");
-    let _ = fs::create_dir_all(&models_dir);
-
-    let model_path = resolve_model_path(root, &models_dir);
 
     let mut cache = mtime_cache::MtimeCache::load(&db_path);
     println!("Scanning repository...");
@@ -82,14 +78,8 @@ fn run_full_search(query: &str, root: &Path) {
     update_mtime_cache(&chunks, &mut cache);
 
     let bm25_results = bm25::search(query, &chunks);
-    let model_exists = model_path.as_ref().map(|p| p.exists()).unwrap_or(false);
-    let vector_results = if let Some(mp) = &model_path {
-        println!("Applying vector re-ranking...");
-        embed::rerank(bm25_results.clone(), query, mp)
-    } else {
-        eprintln!("Vector model not available, using BM25 only.");
-        bm25_results.clone()
-    };
+    println!("Applying vector re-ranking...");
+    let vector_results = embed::rerank(bm25_results.clone(), query, Path::new(""));
 
     println!("\n=== BM25 RESULTS ===");
     print_code_results(&bm25_results, root);
@@ -107,41 +97,12 @@ fn run_full_search(query: &str, root: &Path) {
             println!("{}. {} (score: {:.0}%)", i + 1, &hash[..hash.len().min(12)], score * 100.0);
         }
         if bm25_commits.is_empty() { println!("  (no results)"); }
-        if model_exists {
-            if let Some(mp) = &model_path {
-                println!("\n=== MOST RELEVANT COMMITS (vector) ===");
-                let vec_commits = embed::vector_search_texts(query, &commit_texts, mp);
-                for (i, (hash, score)) in vec_commits.iter().take(10).enumerate() {
-                    println!("{}. {} (score: {:.0}%)", i + 1, &hash[..hash.len().min(12)], ((*score + 1.0) / 2.0) * 100.0);
-                }
-                if vec_commits.is_empty() { println!("  (no results)"); }
-            }
+        println!("\n=== MOST RELEVANT COMMITS (vector) ===");
+        let vec_commits = embed::vector_search_texts(query, &commit_texts, Path::new(""));
+        for (i, (hash, score)) in vec_commits.iter().take(10).enumerate() {
+            println!("{}. {} (score: {:.0}%)", i + 1, &hash[..hash.len().min(12)], ((*score + 1.0) / 2.0) * 100.0);
         }
-    }
-}
-
-fn resolve_model_path(root: &Path, models_dir: &Path) -> Option<std::path::PathBuf> {
-    let exe_dir = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()));
-    let src_models = exe_dir.as_deref()
-        .map(|d| d.join("models"))
-        .filter(|p| p.exists())
-        .or_else(|| {
-            let m = root.join("models");
-            if m.exists() { Some(m) } else { None }
-        });
-    if !assemble::model_path(models_dir).exists() {
-        if let Some(src) = &src_models {
-            match assemble::ensure_assembled(src) {
-                Ok(p) => {
-                    let dst = models_dir.join(p.file_name().unwrap());
-                    if !dst.exists() { let _ = fs::copy(&p, &dst); }
-                    Some(dst)
-                }
-                Err(e) => { eprintln!("model assemble: {}", e); None }
-            }
-        } else { None }
-    } else {
-        Some(assemble::model_path(models_dir))
+        if vec_commits.is_empty() { println!("  (no results)"); }
     }
 }
 
