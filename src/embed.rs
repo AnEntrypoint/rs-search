@@ -132,7 +132,7 @@ fn embed_with_cache(embedder: &Embedder, text: &str, cache: Option<&EmbedCache>,
 fn cache_for(root: &Path) -> Option<EmbedCache> {
     let p = root.join(".code-search");
     if !p.exists() { let _ = std::fs::create_dir_all(&p); }
-    Some(EmbedCache::new(p))
+    Some(EmbedCache::new(&p))
 }
 
 #[cfg(feature = "vector")]
