@@ -78,6 +78,35 @@ struct Embedder {
 static EMBEDDER: OnceLock<Result<Embedder, String>> = OnceLock::new();
 
 #[cfg(feature = "vector")]
+fn remap_gguf_to_hf(gguf_name: &str) -> Option<String> {
+    if let Some(rest) = gguf_name.strip_prefix("blk.") {
+        let dot = rest.find('.')?;
+        let idx = &rest[..dot];
+        let suffix = &rest[dot + 1..];
+        let hf_suffix = match suffix {
+            "attn_qkv.weight" => "attn.Wqkv.weight",
+            "attn_output.weight" => "attn.out_proj.weight",
+            "attn_output_norm.weight" => "norm1.weight",
+            "attn_output_norm.bias" => "norm1.bias",
+            "ffn_up.weight" => "mlp.fc11.weight",
+            "ffn_gate.weight" => "mlp.fc12.weight",
+            "ffn_down.weight" => "mlp.fc2.weight",
+            "layer_output_norm.weight" => "norm2.weight",
+            "layer_output_norm.bias" => "norm2.bias",
+            _ => return None,
+        };
+        return Some(format!("encoder.layers.{}.{}", idx, hf_suffix));
+    }
+    Some(match gguf_name {
+        "token_embd.weight" => "embeddings.word_embeddings.weight".to_string(),
+        "token_types.weight" => "embeddings.token_type_embeddings.weight".to_string(),
+        "token_embd_norm.weight" => "emb_ln.weight".to_string(),
+        "token_embd_norm.bias" => "emb_ln.bias".to_string(),
+        _ => return None,
+    })
+}
+
+#[cfg(feature = "vector")]
 fn load() -> Result<Embedder, String> {
     let device = Device::Cpu;
     let total: usize = MODEL_PARTS.iter().map(|p| p.len()).sum();
@@ -89,10 +118,13 @@ fn load() -> Result<Embedder, String> {
     for name in content.tensor_infos.keys().cloned().collect::<Vec<_>>() {
         let qt = content.tensor(&mut reader, &name, &device).map_err(|e| format!("tensor {}: {}", name, e))?;
         let t = qt.dequantize(&device).map_err(|e| format!("dequantize {}: {}", name, e))?;
-        tensors.insert(name, t);
+        let hf = remap_gguf_to_hf(&name)
+            .ok_or_else(|| format!("unmapped gguf tensor: {}", name))?;
+        tensors.insert(hf, t);
     }
     let vb = VarBuilder::from_tensors(tensors, DType::F32, &device);
-    let model = NomicBertModel::load(vb, &Config::default()).map_err(|e| format!("load model: {}", e))?;
+    let cfg = Config { vocab_size: 30522, ..Config::default() };
+    let model = NomicBertModel::load(vb, &cfg).map_err(|e| format!("load model: {}", e))?;
     let tokenizer = Tokenizer::from_bytes(include_bytes!("../models/tokenizer.json"))
         .map_err(|e| format!("load tokenizer: {}", e))?;
     Ok(Embedder { model, tokenizer, device })
