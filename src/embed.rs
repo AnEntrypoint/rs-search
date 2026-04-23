@@ -179,11 +179,23 @@ pub fn embed_query(_query: &str, _model_path: &Path) -> Option<Vec<f32>> { None 
 
 #[cfg(feature = "vector")]
 pub fn vector_search_texts(query: &str, items: &[(String, String)], _model_path: &Path) -> Vec<(String, f32)> {
-    let embedder = EMBEDDER.get_or_init(load).as_ref().expect("embedded GGUF must load — rs-search binary is broken if this fails");
+    let embedder = match EMBEDDER.get_or_init(load).as_ref() {
+        Ok(e) => e,
+        Err(err) => {
+            eprintln!("rs-search: vector search disabled — embedder init failed: {}", err);
+            return vec![];
+        }
+    };
     let dim = target_dim();
     let cache = cache_for(&std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()));
     let q_text = format!("{}{}", query_prefix(), query);
-    let q_emb = embed_with_cache(embedder, &q_text, cache.as_ref(), dim).expect("embed query");
+    let q_emb = match embed_with_cache(embedder, &q_text, cache.as_ref(), dim) {
+        Ok(v) => v,
+        Err(err) => {
+            eprintln!("rs-search: vector search skipped — query embedding failed: {}", err);
+            return vec![];
+        }
+    };
     let mut scored: Vec<(String, f32)> = items.iter().filter_map(|(id, text)| {
         let doc_text = format!("{}{}", doc_prefix(), &text[..text.len().min(1024)]);
         embed_with_cache(embedder, &doc_text, cache.as_ref(), dim).ok()
@@ -198,11 +210,23 @@ pub fn vector_search_texts(_query: &str, _items: &[(String, String)], _model_pat
 
 #[cfg(feature = "vector")]
 pub fn rerank(mut results: Vec<SearchResult>, query: &str, _model_path: &Path) -> Vec<SearchResult> {
-    let embedder = EMBEDDER.get_or_init(load).as_ref().expect("embedded GGUF must load — rs-search binary is broken if this fails");
+    let embedder = match EMBEDDER.get_or_init(load).as_ref() {
+        Ok(e) => e,
+        Err(err) => {
+            eprintln!("rs-search: rerank skipped — embedder init failed: {}", err);
+            return results;
+        }
+    };
     let dim = target_dim();
     let cache = cache_for(&std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()));
     let q_text = format!("{}{}", query_prefix(), query);
-    let q_emb = embed_with_cache(embedder, &q_text, cache.as_ref(), dim).expect("embed query");
+    let q_emb = match embed_with_cache(embedder, &q_text, cache.as_ref(), dim) {
+        Ok(v) => v,
+        Err(err) => {
+            eprintln!("rs-search: rerank skipped — query embedding failed: {}", err);
+            return results;
+        }
+    };
     let bm25_ranked: Vec<String> = results.iter().enumerate().map(|(i, _)| i.to_string()).collect();
     let mut vec_scores: Vec<(usize, f32)> = Vec::with_capacity(results.len());
     for (i, r) in results.iter().enumerate() {

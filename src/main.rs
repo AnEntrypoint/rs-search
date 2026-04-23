@@ -7,11 +7,26 @@ use clap::{Parser, Subcommand};
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+fn build_features() -> String {
+    let mut feats: Vec<&str> = Vec::new();
+    if cfg!(feature = "vector") { feats.push("vector"); }
+    if cfg!(feature = "perf") { feats.push("perf"); }
+    if cfg!(feature = "pdf") { feats.push("pdf"); }
+    if feats.is_empty() { "none".to_string() } else { feats.join(", ") }
+}
+
 #[derive(Parser)]
-#[command(name = "rs-search", about = "BM25 + vector codebase search with MCP protocol support")]
+#[command(
+    name = "rs-search",
+    version,
+    about = "BM25 + vector codebase search with MCP protocol support",
+    after_help = "Run `rs-search --features` to see enabled build features."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+    #[arg(long, help = "Print enabled build features and exit")]
+    features: bool,
     query: Vec<String>,
 }
 
@@ -37,6 +52,12 @@ fn ensure_gitignore_entry(root: &Path) {
 
 fn main() {
     let cli = Cli::parse();
+
+    if cli.features {
+        println!("rs-search {} features: {}", env!("CARGO_PKG_VERSION"), build_features());
+        return;
+    }
+
     let root = std::env::current_dir().expect("cwd");
 
     match cli.command {
