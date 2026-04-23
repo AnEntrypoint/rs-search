@@ -17,7 +17,15 @@ pub struct Chunk {
 
 const CHUNK_LINES: usize = 60;
 const CHUNK_OVERLAP: usize = 15;
-const MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
+const DEFAULT_MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
+
+fn max_file_bytes() -> u64 {
+    std::env::var("RS_SEARCH_MAX_FILE_BYTES")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_MAX_FILE_BYTES)
+}
 
 fn chunk_text(rel: &str, content: &str, mtime: u64, chunks: &mut Vec<Chunk>) {
     let line_count = content.split('\n').count();
@@ -84,7 +92,7 @@ pub fn scan_repository(root: &Path) -> Vec<Chunk> {
         if !is_code_file(&rel) { continue; }
         if is_binary_file(name) { continue; }
         let meta = match fs::metadata(full) { Ok(m) => m, Err(_) => continue };
-        if meta.len() > MAX_FILE_BYTES { continue; }
+        if meta.len() > max_file_bytes() { continue; }
         let mtime = meta.modified().ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs()).unwrap_or(0);
