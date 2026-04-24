@@ -47,7 +47,7 @@ pub fn target_dim() -> Option<usize> {
 }
 
 pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
-    #[cfg(target_feature = "sse")]
+    #[cfg(all(feature = "simd", target_feature = "sse"))]
     {
         use simsimd::SpatialSimilarity;
         if let Some(d) = f32::cosine(a, b) { return 1.0 - d as f32; }
