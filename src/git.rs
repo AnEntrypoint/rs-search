@@ -2,6 +2,16 @@ use std::path::Path;
 use std::process::Command;
 use crate::ignore::{CODE_EXTENSIONS, should_ignore_dir};
 
+fn git_cmd() -> Command {
+    let mut cmd = Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    cmd
+}
+
 pub struct CommitInfo {
     pub hash: String,
     pub message: String,
@@ -22,7 +32,7 @@ fn is_indexed_file(rel_path: &str) -> bool {
 
 pub fn scan_git_commits(root: &Path, limit: usize) -> Vec<CommitInfo> {
     let hashes = {
-        let out = Command::new("git")
+        let out = git_cmd()
             .args(["log", "--format=%H", &format!("-{}", limit)])
             .current_dir(root)
             .output();
@@ -34,7 +44,7 @@ pub fn scan_git_commits(root: &Path, limit: usize) -> Vec<CommitInfo> {
 
     let mut commits = Vec::new();
     for hash in hashes.lines().filter(|h| !h.is_empty()) {
-        let msg_out = Command::new("git")
+        let msg_out = git_cmd()
             .args(["log", "--format=%s%n%b", "-1", hash])
             .current_dir(root)
             .output();
@@ -43,7 +53,7 @@ pub fn scan_git_commits(root: &Path, limit: usize) -> Vec<CommitInfo> {
             _ => continue,
         };
 
-        let diff_out = Command::new("git")
+        let diff_out = git_cmd()
             .args(["diff-tree", "--no-commit-id", "-r", "--unified=3", hash])
             .current_dir(root)
             .output();
