@@ -31,6 +31,7 @@ pub static IGNORED_DIRS: &[&str] = &[
     ".plugkit-browser-profile",
     "cmake_build_debug","cmake_build_release","CMakeFiles",
     ".code-search",
+    ".gm",
 ];
 
 pub static CODE_EXTENSIONS: &[&str] = &[
