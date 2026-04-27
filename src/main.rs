@@ -74,7 +74,12 @@ fn run_full_search(query: &str, root: &Path) {
     let is_git = root.join(".git").exists();
     if !is_git { eprintln!("Warning: Not a git repository. Indexing current directory anyway.\n"); }
 
-    let db_path = root.join(".code-search");
+    let db_path = root.join(".gm").join("code-search");
+    let legacy = root.join(".code-search");
+    if legacy.exists() && !db_path.exists() {
+        let _ = fs::create_dir_all(root.join(".gm"));
+        let _ = fs::rename(&legacy, &db_path);
+    }
     let _ = fs::create_dir_all(&db_path);
 
     let mut cache = mtime_cache::MtimeCache::load(&db_path);
