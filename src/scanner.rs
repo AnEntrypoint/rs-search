@@ -60,8 +60,12 @@ fn path_hits_ignored_dir(rel: &str) -> bool {
 }
 
 pub fn scan_repository(root: &Path) -> Vec<Chunk> {
-    let db_path = root.join(".code-search");
-    let db = if db_path.exists() { Some(db_path.as_path()) } else { None };
+    let db_path = root.join(".gm").join("code-search");
+    let legacy_db_path = root.join(".code-search");
+    let db_ref = if db_path.exists() { Some(db_path.clone()) }
+                 else if legacy_db_path.exists() { Some(legacy_db_path) }
+                 else { None };
+    let db = db_ref.as_deref();
     let mut chunks = Vec::new();
     let walker = WalkBuilder::new(root)
         .hidden(false)
