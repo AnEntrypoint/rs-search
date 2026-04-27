@@ -37,19 +37,6 @@ enum Command {
     Search { query: Vec<String> },
 }
 
-fn ensure_gitignore_entry(root: &Path) {
-    let gi = root.join(".gitignore");
-    let entry = ".code-search/";
-    if gi.exists() {
-        let content = fs::read_to_string(&gi).unwrap_or_default();
-        if !content.contains(entry) {
-            let _ = fs::write(&gi, format!("{}\n{}", content.trim_end(), entry));
-        }
-    } else {
-        let _ = fs::write(&gi, format!("{}\n", entry));
-    }
-}
-
 fn main() {
     let cli = Cli::parse();
 
@@ -86,7 +73,6 @@ fn run_full_search(query: &str, root: &Path) {
     println!("Code Search Tool\nRoot: {}\n", root.display());
     let is_git = root.join(".git").exists();
     if !is_git { eprintln!("Warning: Not a git repository. Indexing current directory anyway.\n"); }
-    ensure_gitignore_entry(root);
 
     let db_path = root.join(".code-search");
     let _ = fs::create_dir_all(&db_path);
