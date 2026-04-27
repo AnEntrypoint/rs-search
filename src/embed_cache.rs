@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct EmbedCache {
     dir: PathBuf,
@@ -47,5 +47,27 @@ impl EmbedCache {
         let mut bytes = Vec::with_capacity(vec.len() * 4);
         for v in vec { bytes.extend_from_slice(&v.to_le_bytes()); }
         let _ = fs::write(self.disk_path(key), &bytes);
+    }
+
+    pub fn sweep_orphans(&self, live_keys: &HashSet<String>) -> (usize, u64) {
+        let mut removed = 0usize;
+        let mut bytes_freed = 0u64;
+        let entries = match fs::read_dir(&self.dir) { Ok(e) => e, Err(_) => return (0, 0) };
+        for ent in entries.flatten() {
+            let path = ent.path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+            let Some(key) = name.strip_suffix(".bin") else { continue };
+            if !live_keys.contains(key) {
+                let size = ent.metadata().map(|m| m.len()).unwrap_or(0);
+                if fs::remove_file(&path).is_ok() {
+                    removed += 1;
+                    bytes_freed += size;
+                }
+            }
+        }
+        if let Ok(mut mem) = self.mem.lock() {
+            mem.retain(|k, _| live_keys.contains(k));
+        }
+        (removed, bytes_freed)
     }
 }
