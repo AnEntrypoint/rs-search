@@ -3,3 +3,7 @@
 .codeinsight
 .codeinsight/
 .gm-stop-verified
+dist/
+.gm/
+rs-learn.db
+.plugkit-browser-profile/
