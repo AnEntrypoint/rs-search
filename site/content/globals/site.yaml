@@ -1,0 +1,17 @@
+title: "rs-search"
+tagline: "BM25 codebase search over MCP"
+description: "fast BM25 ranked code search over MCP. how gm finds \"where X happens\" without burning context."
+repo: "https://github.com/AnEntrypoint/rs-search"
+url: "https://anentrypoint.github.io/rs-search"
+year: 2026
+keywords:
+  - "rust"
+  - "search"
+  - "mcp"
+  - "247420"
+  - "anentrypoint"
+accent_from: "#7ee787"
+accent_to: "#56d364"
+glyph: "⌕"
+code: "003"
+category: "gm"
