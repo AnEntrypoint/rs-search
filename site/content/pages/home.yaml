@@ -1,0 +1,29 @@
+id: home
+title: Home
+hero:
+  heading: "rs-search"
+  subheading: "BM25 codebase search over MCP"
+  body: "fast BM25 ranked code search over MCP. how gm finds \"where X happens\" without burning context."
+  badges:
+    - { label: "rust" }
+    - { label: "search" }
+    - { label: "mcp" }
+    - { label: "gm" }
+  ctas:
+    - { label: "GitHub", href: "https://github.com/AnEntrypoint/rs-search", primary: true }
+    - { label: "Install", href: "https://github.com/AnEntrypoint/rs-search#installation" }
+    - { label: "247420", href: "https://247420.xyz" }
+features:
+  heading: "Why rs-search"
+  items:
+    - { name: "rust", desc: "flagship trait of rs-search." }
+    - { name: "search", desc: "core capability of rs-search." }
+    - { name: "mcp", desc: "core capability of rs-search." }
+quickstart:
+  heading: Quick start
+  lines:
+    - { kind: "cmt", text: "# install" }
+    - { kind: "cmd", text: "cargo install rs-search" }
+    - { kind: "cmt", text: "" }
+    - { kind: "cmt", text: "# source" }
+    - { kind: "cmd", text: "git clone https://github.com/AnEntrypoint/rs-search.git" }
