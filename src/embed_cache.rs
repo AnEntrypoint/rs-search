@@ -10,7 +10,6 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS emb_cache (key TEXT PRIMARY KEY
 pub struct EmbedCache {
     conn: Connection,
     mem: Mutex<HashMap<String, Vec<f32>>>,
-    owns_runtime: bool,
 }
 
 static FALLBACK_RUNTIME: OnceLock<Runtime> = OnceLock::new();
@@ -60,7 +59,7 @@ impl EmbedCache {
                 .expect("rs-search EmbedCache: create schema");
             conn
         });
-        Self { conn, mem: Mutex::new(HashMap::new()), owns_runtime: true }
+        Self { conn, mem: Mutex::new(HashMap::new()) }
     }
 
     pub fn with_connection(conn: Connection) -> Self {
@@ -69,7 +68,7 @@ impl EmbedCache {
                 .await
                 .expect("rs-search EmbedCache: create schema on shared conn");
         });
-        Self { conn, mem: Mutex::new(HashMap::new()), owns_runtime: false }
+        Self { conn, mem: Mutex::new(HashMap::new()) }
     }
 
     pub fn key(model_tag: &str, dim: usize, text: &str) -> String {
