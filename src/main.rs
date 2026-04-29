@@ -110,7 +110,8 @@ fn run_full_search(query: &str, root: &Path) {
         let commit_lookup: std::collections::HashMap<String, &git::CommitInfo> =
             commits.iter().map(|c| (c.hash.clone(), c)).collect();
         println!("=== MOST RELEVANT COMMITS (BM25) ===");
-        let bm25_commits = bm25::search_texts(query, &commit_texts);
+        let bm25_commits: Vec<(String, f32)> = bm25::search_texts(query, &commit_texts)
+            .into_iter().map(|(s, v)| (s, v as f32)).collect();
         print_commit_results(&bm25_commits, &commit_lookup, false);
         println!("\n=== MOST RELEVANT COMMITS (vector) ===");
         let vec_commits = embed::vector_search_texts(query, &commit_texts, &db_path);
