@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [features]
 default = ["vector", "perf", "pdf", "simd"]
-vector = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
+vector = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:libsql", "dep:tokio"]
 perf = ["dep:mimalloc"]
 pdf = ["dep:pdf-extract"]
 simd = ["dep:simsimd"]
@@ -33,6 +33,9 @@ candle-nn = { version = "0.10", optional = true }
 candle-transformers = { version = "0.10", optional = true }
 tokenizers = { version = "0.22", default-features = false, optional = true }
 mimalloc = { version = "0.1", default-features = false, optional = true }
+
+libsql = { version = "0.9", default-features = false, features = ["core", "serde"], optional = true }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"], optional = true }
 
 [profile.release]
 lto = "thin"
