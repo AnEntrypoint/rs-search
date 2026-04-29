@@ -162,6 +162,9 @@ fn embed_with_cache(embedder: &Embedder, text: &str, cache: Option<&EmbedCache>,
 
 #[cfg(feature = "vector")]
 fn cache_for(root: &Path) -> Option<EmbedCache> {
+    if let Some(conn) = crate::embed_cache::shared_connection() {
+        return Some(EmbedCache::with_connection(conn));
+    }
     let p = root.join(".code-search");
     if !p.exists() { let _ = std::fs::create_dir_all(&p); }
     Some(EmbedCache::new(&p))
