@@ -84,31 +84,36 @@ fn run_full_search(query: &str, root: &Path) {
     let _ = fs::create_dir_all(&db_path);
 
     let mut cache = mtime_cache::MtimeCache::load(&db_path);
-    println!("Scanning repository...");
+    eprintln!("[sync] scanning repository…");
     let chunks = scanner::scan_repository(root);
-    println!("Found {} code chunks\n", chunks.len());
-
     update_mtime_cache(&chunks, &mut cache);
 
+    eprintln!("[sync] running BM25…");
     let bm25_results = bm25::search(query, &chunks);
-    println!("Applying vector re-ranking...");
+    eprintln!("[sync] re-embedding changed chunks + ranking…");
     let vector_results = embed::rerank(bm25_results.clone(), query, &db_path);
 
+    let (swept_n, swept_bytes) = sweep_emb_cache_counts(&chunks, query, &db_path);
+
+    println!("[index fully synced: {} files / {} chunks / {} stale embeddings swept ({} KB freed)]\n",
+        chunks.iter().map(|c| c.file_path.clone()).collect::<HashSet<_>>().len(),
+        chunks.len(),
+        swept_n,
+        swept_bytes / 1024);
+
     let query_tokens = tokenize::tokenize(query);
-    println!("\n=== BM25 RESULTS ===");
+    println!("=== BM25 RESULTS ===");
     print_code_results(&bm25_results, root, &query_tokens);
     println!("\n=== VECTOR RESULTS ===");
     print_code_results(&vector_results, root, &query_tokens);
 
-    sweep_emb_cache(&chunks, query, &db_path);
-
     if is_git {
-        println!("\nIndexing git commits...");
+        eprintln!("[sync] re-scanning git commits (no commit-list cache)…");
         let commits = git::scan_git_commits(root, 200);
-        println!("Found {} commits with indexed-file diffs\n", commits.len());
         let commit_texts = git::commits_to_searchable(&commits);
         let commit_lookup: std::collections::HashMap<String, &git::CommitInfo> =
             commits.iter().map(|c| (c.hash.clone(), c)).collect();
+        println!("\n[git history fully synced: {} commits with indexed-file diffs]\n", commits.len());
         println!("=== MOST RELEVANT COMMITS (BM25) ===");
         let bm25_commits: Vec<(String, f32)> = bm25::search_texts(query, &commit_texts)
             .into_iter().map(|(s, v)| (s, v as f32)).collect();
@@ -162,6 +167,10 @@ fn truncate_str(s: &str, max: usize) -> String {
 }
 
 fn sweep_emb_cache(chunks: &[scanner::Chunk], query: &str, db_path: &Path) {
+    let _ = sweep_emb_cache_counts(chunks, query, db_path);
+}
+
+fn sweep_emb_cache_counts(chunks: &[scanner::Chunk], query: &str, db_path: &Path) -> (usize, usize) {
     let dim = embed::target_dim().unwrap_or(0);
     let model_tag = "nomic-embed-text-v1.5";
     let mut live: HashSet<String> = HashSet::new();
@@ -174,10 +183,7 @@ fn sweep_emb_cache(chunks: &[scanner::Chunk], query: &str, db_path: &Path) {
         ));
     }
     let cache = rs_search::embed_cache::EmbedCache::new(db_path);
-    let (removed, freed) = cache.sweep_orphans(&live);
-    if removed > 0 {
-        println!("emb-cache: swept {} orphaned vectors ({} KB freed)", removed, freed / 1024);
-    }
+    cache.sweep_orphans(&live)
 }
 
 fn update_mtime_cache(chunks: &[scanner::Chunk], cache: &mut mtime_cache::MtimeCache) {
