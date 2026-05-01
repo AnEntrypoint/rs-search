@@ -166,11 +166,7 @@ fn truncate_str(s: &str, max: usize) -> String {
     out
 }
 
-fn sweep_emb_cache(chunks: &[scanner::Chunk], query: &str, db_path: &Path) {
-    let _ = sweep_emb_cache_counts(chunks, query, db_path);
-}
-
-fn sweep_emb_cache_counts(chunks: &[scanner::Chunk], query: &str, db_path: &Path) -> (usize, usize) {
+fn sweep_emb_cache_counts(chunks: &[scanner::Chunk], query: &str, db_path: &Path) -> (usize, u64) {
     let dim = embed::target_dim().unwrap_or(0);
     let model_tag = "nomic-embed-text-v1.5";
     let mut live: HashSet<String> = HashSet::new();
