@@ -18,6 +18,7 @@ pub struct Chunk {
 const CHUNK_LINES: usize = 60;
 const CHUNK_OVERLAP: usize = 15;
 const DEFAULT_MAX_FILE_BYTES: u64 = 50 * 1024 * 1024;
+const DEFAULT_MAX_CHUNKS: usize = 50_000;
 
 fn max_file_bytes() -> u64 {
     std::env::var("RS_SEARCH_MAX_FILE_BYTES")
@@ -25,6 +26,14 @@ fn max_file_bytes() -> u64 {
         .and_then(|s| s.parse::<u64>().ok())
         .filter(|&n| n > 0)
         .unwrap_or(DEFAULT_MAX_FILE_BYTES)
+}
+
+fn max_chunks() -> usize {
+    std::env::var("RS_SEARCH_MAX_CHUNKS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_MAX_CHUNKS)
 }
 
 fn chunk_text(rel: &str, content: &str, mtime: u64, chunks: &mut Vec<Chunk>) {
@@ -109,6 +118,10 @@ pub fn scan_repository(root: &Path) -> Vec<Chunk> {
         }
         let content = match fs::read_to_string(full) { Ok(c) => c, Err(_) => continue };
         chunk_text(&rel, &content, mtime, &mut chunks);
+    }
+    if chunks.len() > max_chunks() {
+        chunks.sort_by_key(|c| std::cmp::Reverse(c.mtime));
+        chunks.truncate(max_chunks());
     }
     chunks
 }
