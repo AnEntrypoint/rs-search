@@ -1,5 +1,5 @@
 use std::io::{self, BufRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use serde_json::{json, Value};
@@ -8,6 +8,7 @@ use crate::bm25::{search, search_texts};
 use crate::embed::{rerank, vector_search_texts};
 use crate::git::{scan_git_commits, commits_to_searchable};
 use crate::context::{find_enclosing_context, get_file_total_lines};
+use crate::resolve_index::{resolve_root, resolve_index};
 
 struct IndexCache {
     chunks: Vec<crate::scanner::Chunk>,
@@ -27,29 +28,40 @@ fn now_millis() -> u64 {
 }
 
 fn run_search_tool(
-    repo: &str,
+    repo_path: &Path,
+    db_path: &Path,
     query: &str,
     cache: &mut HashMap<String, IndexCache>,
 ) -> String {
-    let repo_path = Path::new(repo);
+    let cache_key = format!("{}|{}", repo_path.display(), db_path.display());
     let dir_mt = dir_mtime(repo_path);
-    let cached = cache.get(repo).filter(|c| c.indexed_at >= dir_mt);
+    let cached = cache.get(&cache_key).filter(|c| c.indexed_at >= dir_mt);
     let chunks = if let Some(c) = cached {
         c.chunks.clone()
     } else {
         let ch = scan_repository(repo_path);
-        cache.insert(repo.to_string(), IndexCache { chunks: ch.clone(), indexed_at: now_millis() });
+        cache.insert(cache_key, IndexCache { chunks: ch.clone(), indexed_at: now_millis() });
         ch
     };
-    let placeholder = Path::new("");
+    let _ = std::fs::create_dir_all(db_path);
     let bm25_results = search(query, &chunks);
-    let vector_results = rerank(bm25_results.clone(), query, placeholder);
+    let vector_results = rerank(bm25_results.clone(), query, db_path);
     let commits = scan_git_commits(repo_path, 200);
     let commit_texts = commits_to_searchable(&commits);
     let bm25_commits = search_texts(query, &commit_texts);
-    let vector_commits = vector_search_texts(query, &commit_texts, placeholder);
+    let vector_commits = vector_search_texts(query, &commit_texts, db_path);
 
-    format_all(query, repo_path, &bm25_results, &vector_results, &bm25_commits, &vector_commits)
+    format_all(query, repo_path, db_path, &bm25_results, &vector_results, &bm25_commits, &vector_commits)
+}
+
+fn resolve_call_paths(args: &Value) -> (PathBuf, PathBuf) {
+    let repo = args.get("repository_path").and_then(|v| v.as_str())
+        .or_else(|| args.get("project_root").and_then(|v| v.as_str()));
+    let root = resolve_root(repo);
+    let index = args.get("index").and_then(|v| v.as_str());
+    let discipline = args.get("discipline").and_then(|v| v.as_str());
+    let db = resolve_index(&root, index, discipline);
+    (root, db)
 }
 
 fn handle_tools_call(id: Value, params: Value, cache: &mut HashMap<String, IndexCache>) -> Value {
@@ -58,10 +70,8 @@ fn handle_tools_call(id: Value, params: Value, cache: &mut HashMap<String, Index
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
     let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if query.is_empty() { return err_response(id, "query is required".into()); }
-    let repo = args.get("repository_path").and_then(|v| v.as_str())
-        .map(String::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string());
-    let result = catch_unwind(AssertUnwindSafe(|| run_search_tool(&repo, &query, cache)));
+    let (repo_path, db_path) = resolve_call_paths(&args);
+    let result = catch_unwind(AssertUnwindSafe(|| run_search_tool(&repo_path, &db_path, &query, cache)));
     match result {
         Ok(text) => json!({ "jsonrpc": "2.0", "id": id, "result": { "content": [{ "type": "text", "text": text }] } }),
         Err(_) => rpc_error(id, -32603, "Internal error: search panicked".into()),
@@ -99,7 +109,10 @@ pub fn run_mcp_server() {
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "repository_path": { "type": "string", "description": "Path to repository (defaults to cwd)" },
+                            "repository_path": { "type": "string", "description": "Path to repository (defaults to cwd). Alias: project_root." },
+                            "project_root": { "type": "string", "description": "Project root directory (alias for repository_path)." },
+                            "index": { "type": "string", "description": "Explicit index directory; wins over discipline. Absolute or relative to project_root." },
+                            "discipline": { "type": "string", "description": "Discipline name; resolves to <project_root>/.gm/disciplines/<name>/code-search." },
                             "query": { "type": "string", "description": "Natural language search query", "maxLength": 8192 }
                         },
                         "required": ["query"]
@@ -165,12 +178,13 @@ fn format_commit_hashes_vec(items: &[(String, f32)]) -> String {
 fn format_all(
     query: &str,
     root: &Path,
+    db_path: &Path,
     bm25: &[crate::bm25::SearchResult],
     vector: &[crate::bm25::SearchResult],
     bm25_commits: &[(String, f64)],
     vec_commits: &[(String, f32)],
 ) -> String {
-    let mut out = format!("Search results for: \"{}\"\n\n", query);
+    let mut out = format!("Search results for: \"{}\"\nRoot: {}\nIndex: {}\n\n", query, root.display(), db_path.display());
     out.push_str("=== BM25 RESULTS ===\n");
     out.push_str(&format_code_results(bm25, root));
     out.push_str("=== VECTOR RESULTS ===\n");
