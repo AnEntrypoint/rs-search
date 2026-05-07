@@ -1,7 +1,7 @@
-use rs_search::{bm25, context, embed, explain, git, mcp, mtime_cache, scanner, tokenize};
+use rs_search::{bm25, context, embed, explain, git, mcp, mtime_cache, resolve_index, scanner, tokenize};
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 
 #[cfg(feature = "perf")]
@@ -28,6 +28,12 @@ struct Cli {
     command: Option<Command>,
     #[arg(long, help = "Print enabled build features and exit")]
     features: bool,
+    #[arg(long, value_name = "DIR", help = "Project root (defaults to cwd)")]
+    root: Option<String>,
+    #[arg(long, value_name = "DIR", help = "Explicit index directory; wins over --discipline")]
+    index: Option<String>,
+    #[arg(long, value_name = "NAME", help = "Discipline name; resolves to <root>/.gm/disciplines/<name>/code-search")]
+    discipline: Option<String>,
     query: Vec<String>,
 }
 
@@ -46,7 +52,8 @@ fn main() {
         return;
     }
 
-    let root = std::env::current_dir().expect("cwd");
+    let root: PathBuf = resolve_index::resolve_root(cli.root.as_deref());
+    let db_path: PathBuf = resolve_index::resolve_index(&root, cli.index.as_deref(), cli.discipline.as_deref());
 
     match cli.command {
         Some(Command::Serve) => { mcp::run_mcp_server(); return; }
@@ -57,7 +64,7 @@ fn main() {
             return;
         }
         Some(Command::Search { query }) => {
-            run_full_search(&query.join(" "), &root);
+            run_full_search(&query.join(" "), &root, &db_path);
             return;
         }
         None => {}
@@ -67,19 +74,21 @@ fn main() {
         mcp::run_mcp_server();
         return;
     }
-    run_full_search(&cli.query.join(" "), &root);
+    run_full_search(&cli.query.join(" "), &root, &db_path);
 }
 
-fn run_full_search(query: &str, root: &Path) {
-    println!("Code Search Tool\nRoot: {}\n", root.display());
+fn run_full_search(query: &str, root: &Path, db_path: &Path) {
+    println!("Code Search Tool\nRoot: {}\nIndex: {}\n", root.display(), db_path.display());
     let is_git = root.join(".git").exists();
     if !is_git { eprintln!("Warning: Not a git repository. Indexing current directory anyway.\n"); }
 
-    let db_path = root.join(".gm").join("code-search");
-    let legacy = root.join(".code-search");
-    if legacy.exists() && !db_path.exists() {
-        let _ = fs::create_dir_all(root.join(".gm"));
-        let _ = fs::rename(&legacy, &db_path);
+    let default_db = root.join(".gm").join("code-search");
+    if db_path == default_db {
+        let legacy = root.join(".code-search");
+        if legacy.exists() && !db_path.exists() {
+            let _ = fs::create_dir_all(root.join(".gm"));
+            let _ = fs::rename(&legacy, &db_path);
+        }
     }
     let _ = fs::create_dir_all(&db_path);
 

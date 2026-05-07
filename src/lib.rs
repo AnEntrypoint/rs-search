@@ -9,6 +9,7 @@ pub mod git;
 pub mod ignore;
 pub mod mcp;
 pub mod mtime_cache;
+pub mod resolve_index;
 #[cfg(feature = "pdf")]
 pub mod pdf;
 pub mod scanner;
