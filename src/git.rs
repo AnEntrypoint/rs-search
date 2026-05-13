@@ -1,7 +1,10 @@
 use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::Command;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::ignore::{CODE_EXTENSIONS, should_ignore_dir};
 
+#[cfg(not(target_arch = "wasm32"))]
 fn git_cmd() -> Command {
     let mut cmd = Command::new("git");
     #[cfg(windows)]
@@ -18,6 +21,13 @@ pub struct CommitInfo {
     pub diff_text: String,
 }
 
+#[cfg(target_arch = "wasm32")]
+pub fn scan_git_commits(_root: &Path, _limit: usize) -> Vec<CommitInfo> { Vec::new() }
+
+#[cfg(target_arch = "wasm32")]
+pub fn commits_to_searchable(_commits: &[CommitInfo]) -> Vec<(String, String)> { Vec::new() }
+
+#[cfg(not(target_arch = "wasm32"))]
 fn is_indexed_file(rel_path: &str) -> bool {
     let norm = rel_path.replace('\\', "/");
     let parts: Vec<&str> = norm.split('/').collect();
@@ -30,6 +40,7 @@ fn is_indexed_file(rel_path: &str) -> bool {
     CODE_EXTENSIONS.contains(&ext)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn scan_git_commits(root: &Path, limit: usize) -> Vec<CommitInfo> {
     let hashes = {
         let out = git_cmd()
@@ -74,6 +85,7 @@ pub fn scan_git_commits(root: &Path, limit: usize) -> Vec<CommitInfo> {
     commits
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn filter_diff_to_indexed_files(raw: &str) -> String {
     let mut out = String::new();
     let mut in_indexed = false;
@@ -109,6 +121,7 @@ fn filter_diff_to_indexed_files(raw: &str) -> String {
     out
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn commits_to_searchable(commits: &[CommitInfo]) -> Vec<(String, String)> {
     commits.iter().map(|c| {
         let text = if c.diff_text.is_empty() {
