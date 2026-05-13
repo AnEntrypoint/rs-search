@@ -17,6 +17,7 @@ vector = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:to
 perf = ["dep:mimalloc"]
 pdf = ["dep:pdf-extract"]
 simd = ["dep:simsimd"]
+wasm = []
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

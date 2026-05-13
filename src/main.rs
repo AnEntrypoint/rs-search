@@ -1,4 +1,6 @@
-use rs_search::{bm25, context, embed, explain, git, mcp, mtime_cache, resolve_index, scanner, tokenize};
+use rs_search::{bm25, context, embed, explain, git, mtime_cache, resolve_index, scanner, tokenize};
+#[cfg(not(target_arch = "wasm32"))]
+use rs_search::mcp;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -56,7 +58,10 @@ fn main() {
     let db_path: PathBuf = resolve_index::resolve_index(&root, cli.index.as_deref(), cli.discipline.as_deref());
 
     match cli.command {
+        #[cfg(not(target_arch = "wasm32"))]
         Some(Command::Serve) => { mcp::run_mcp_server(); return; }
+        #[cfg(target_arch = "wasm32")]
+        Some(Command::Serve) => { eprintln!("rs-search: mcp serve not available on wasm"); return; }
         Some(Command::Explain { query }) => {
             let q = query.join(" ");
             let e = explain::explain(&q, &root);
@@ -71,8 +76,10 @@ fn main() {
     }
 
     if cli.query.is_empty() {
-        mcp::run_mcp_server();
-        return;
+        #[cfg(not(target_arch = "wasm32"))]
+        { mcp::run_mcp_server(); return; }
+        #[cfg(target_arch = "wasm32")]
+        { eprintln!("rs-search: no query and mcp serve unavailable on wasm"); return; }
     }
     run_full_search(&cli.query.join(" "), &root, &db_path);
 }
@@ -102,7 +109,10 @@ fn run_full_search(query: &str, root: &Path, db_path: &Path) {
     eprintln!("[sync] re-embedding changed chunks + ranking…");
     let vector_results = embed::rerank(bm25_results.clone(), query, &db_path);
 
+    #[cfg(feature = "vector")]
     let (swept_n, swept_bytes) = sweep_emb_cache_counts(&chunks, query, &db_path);
+    #[cfg(not(feature = "vector"))]
+    let (swept_n, swept_bytes) = (0usize, 0u64);
 
     println!("[index fully synced: {} files / {} chunks / {} stale embeddings swept ({} KB freed)]\n",
         chunks.iter().map(|c| c.file_path.clone()).collect::<HashSet<_>>().len(),
@@ -175,6 +185,7 @@ fn truncate_str(s: &str, max: usize) -> String {
     out
 }
 
+#[cfg(feature = "vector")]
 fn sweep_emb_cache_counts(chunks: &[scanner::Chunk], query: &str, db_path: &Path) -> (usize, u64) {
     let dim = embed::target_dim().unwrap_or(0);
     let model_tag = "nomic-embed-text-v1.5";
