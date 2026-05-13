@@ -1,12 +1,14 @@
 pub mod bm25;
 pub mod context;
 pub mod embed;
+#[cfg(feature = "vector")]
 pub mod embed_cache;
 pub mod eval;
 pub mod explain;
 pub mod fusion;
 pub mod git;
 pub mod ignore;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod mcp;
 pub mod mtime_cache;
 pub mod resolve_index;
