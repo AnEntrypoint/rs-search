@@ -16,9 +16,65 @@ pub mod resolve_index;
 pub mod pdf;
 pub mod scanner;
 pub mod tokenize;
+#[cfg(target_arch = "wasm32")]
+pub mod wasm_host;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone)]
+pub struct SearchHit {
+    pub id: String,
+    pub score: f32,
+    pub snippet: String,
+}
+
+pub struct Searcher {
+    pub root: PathBuf,
+}
+
+impl Searcher {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn search(&self, query: &str, k: usize) -> Vec<SearchHit> {
+        let results = run_search(query, &self.root);
+        results
+            .into_iter()
+            .take(k)
+            .map(|r| SearchHit {
+                id: format!("{}:{}", r.chunk.file_path, r.chunk.line_start),
+                score: r.score as f32,
+                snippet: r.chunk.content,
+            })
+            .collect()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn search(&self, query: &str, k: usize) -> Vec<SearchHit> {
+        match wasm_host::vec_search(query, k as u32) {
+            Ok(hits) => hits
+                .into_iter()
+                .map(|h| {
+                    let snippet = h
+                        .payload
+                        .get("snippet")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    SearchHit { id: h.id, score: h.score, snippet }
+                })
+                .collect(),
+            Err(e) => {
+                wasm_host::log(&format!("rs-search host_vec_search error: {}", e));
+                Vec::new()
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_search(query: &str, root: &Path) -> Vec<bm25::SearchResult> {
     let chunks = scanner::scan_repository(root);
     let results = bm25::search(query, &chunks);
