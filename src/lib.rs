@@ -53,24 +53,19 @@ impl Searcher {
 
     #[cfg(target_arch = "wasm32")]
     pub fn search(&self, query: &str, k: usize) -> Vec<SearchHit> {
-        match wasm_host::vec_search(query, k as u32) {
-            Ok(hits) => hits
-                .into_iter()
-                .map(|h| {
-                    let snippet = h
-                        .payload
-                        .get("snippet")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    SearchHit { id: h.id, score: h.score, snippet }
-                })
-                .collect(),
-            Err(e) => {
-                wasm_host::log(&format!("rs-search host_vec_search error: {}", e));
-                Vec::new()
-            }
-        }
+        let root_str = self.root.to_string_lossy();
+        let hits = wasm_host::fusion_search(query, k as u32, &root_str);
+        hits.into_iter()
+            .map(|h| {
+                let snippet = h
+                    .payload
+                    .get("snippet")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                SearchHit { id: h.id, score: h.score, snippet }
+            })
+            .collect()
     }
 }
 
