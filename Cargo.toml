@@ -6,6 +6,7 @@ edition = "2021"
 [lib]
 name = "rs_search"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
 name = "rs-search"
