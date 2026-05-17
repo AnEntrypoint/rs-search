@@ -1,5 +1,3 @@
-#![cfg(target_arch = "wasm32")]
-
 use serde::Deserialize;
 
 extern "C" {
@@ -24,11 +22,6 @@ unsafe fn take_bytes(packed: u64) -> Vec<u8> {
     }
     let slice = core::slice::from_raw_parts(ptr as *const u8, len as usize);
     slice.to_vec()
-}
-
-unsafe fn take_string(packed: u64) -> Option<String> {
-    let bytes = take_bytes(packed);
-    if bytes.is_empty() { None } else { Some(String::from_utf8_lossy(&bytes).into_owned()) }
 }
 
 pub fn log(msg: &str) {

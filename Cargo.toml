@@ -6,55 +6,18 @@ edition = "2021"
 [lib]
 name = "rs_search"
 path = "src/lib.rs"
-crate-type = ["rlib", "cdylib"]
-
-[[bin]]
-name = "rs-search"
-path = "src/main.rs"
+crate-type = ["cdylib"]
 
 [features]
-default = ["vector", "perf", "pdf", "simd"]
-vector = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers", "dep:libsql", "dep:tokio"]
-perf = ["dep:mimalloc"]
-pdf = ["dep:pdf-extract"]
-simd = ["dep:simsimd"]
+default = []
 wasm = []
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
-pdf-extract = { version = "0.9", optional = true }
-blake3 = "1"
-simsimd = { version = "6", optional = true }
-ignore = "0.4"
-arc-swap = "1"
-
-candle-core = { version = "0.10", optional = true }
-candle-nn = { version = "0.10", optional = true }
-candle-transformers = { version = "0.10", optional = true }
-tokenizers = { version = "0.22", default-features = false, optional = true }
-mimalloc = { version = "0.1", default-features = false, optional = true }
-
-libsql = { version = "0.9", default-features = false, features = ["core", "serde"], optional = true }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"], optional = true }
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
-
-[workspace.metadata.dist]
-cargo-dist-version = "0.25.1"
-ci = "github"
-installers = ["shell", "powershell"]
-targets = [
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu",
-    "x86_64-apple-darwin",
-    "aarch64-apple-darwin",
-    "x86_64-pc-windows-msvc",
-    "aarch64-pc-windows-msvc",
-]
-pr-run-mode = "plan"
