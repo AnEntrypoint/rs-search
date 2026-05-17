@@ -106,9 +106,9 @@ pub fn fusion_search(query: &str, k: u32, root: &str) -> Vec<HostHit> {
 
     let mut results: Vec<HostHit> = scores.into_iter()
         .map(|(id, score)| HostHit {
+            payload: payloads.remove(&id).unwrap_or(serde_json::Value::Null),
             id,
             score,
-            payload: payloads.remove(&id).unwrap_or(serde_json::Value::Null),
         })
         .collect();
     results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
