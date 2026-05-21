@@ -70,14 +70,11 @@ pub fn git_search(query: &str, k: u32, root: &str) -> Result<Vec<HostHit>, Strin
         .map_err(|e| format!("host_git_search decode: {}", e))
 }
 
-/// Fusion search: combines vector, BM25, and git results with RRF scoring.
-/// Mirrors CLI fusion.rs logic — thebird host implements each source.
 pub fn fusion_search(query: &str, k: u32, root: &str) -> Vec<HostHit> {
     let vec_hits = vec_search(query, k).unwrap_or_default();
     let bm25_hits = bm25_search(query, k, root).unwrap_or_default();
     let git_hits = git_search(query, k, root).unwrap_or_default();
 
-    // RRF (Reciprocal Rank Fusion) scoring
     let mut scores: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
     let mut payloads: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
 
