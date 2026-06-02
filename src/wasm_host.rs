@@ -1,5 +1,6 @@
 use serde::Deserialize;
 
+#[link(wasm_import_module = "env")]
 extern "C" {
     pub fn host_vec_search(query_ptr: *const u8, query_len: u32, k: u32) -> u64;
     pub fn host_bm25_search(query_ptr: *const u8, query_len: u32, k: u32, root_ptr: *const u8, root_len: u32) -> u64;
