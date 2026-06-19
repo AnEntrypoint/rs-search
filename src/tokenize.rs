@@ -35,5 +35,7 @@ pub fn add_word_tokens(word: &str, out: &mut HashSet<String>) {
 pub fn tokenize(text: &str) -> Vec<String> {
     let mut tokens: HashSet<String> = HashSet::new();
     for word in text.split_whitespace() { add_word_tokens(word, &mut tokens); }
-    tokens.into_iter().collect()
+    let mut v: Vec<String> = tokens.into_iter().collect();
+    v.sort();
+    v
 }
