@@ -72,9 +72,9 @@ pub fn git_search(query: &str, k: u32, root: &str) -> Result<Vec<HostHit>, Strin
 }
 
 pub fn fusion_search(query: &str, k: u32, root: &str) -> Vec<HostHit> {
-    let vec_hits = vec_search(query, k).unwrap_or_default();
-    let bm25_hits = bm25_search(query, k, root).unwrap_or_default();
-    let git_hits = git_search(query, k, root).unwrap_or_default();
+    let vec_hits = vec_search(query, k).unwrap_or_else(|e| { log(&format!("search error vec: {}", e)); vec![] });
+    let bm25_hits = bm25_search(query, k, root).unwrap_or_else(|e| { log(&format!("search error bm25: {}", e)); vec![] });
+    let git_hits = git_search(query, k, root).unwrap_or_else(|e| { log(&format!("search error git: {}", e)); vec![] });
 
     let mut scores: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
     let mut payloads: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
