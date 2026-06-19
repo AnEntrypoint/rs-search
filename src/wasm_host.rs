@@ -76,33 +76,27 @@ pub fn fusion_search(query: &str, k: u32, root: &str) -> Vec<HostHit> {
     let bm25_hits = bm25_search(query, k, root).unwrap_or_else(|e| { log(&format!("search error bm25: {}", e)); vec![] });
     let git_hits = git_search(query, k, root).unwrap_or_else(|e| { log(&format!("search error git: {}", e)); vec![] });
 
-    let mut scores: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
+    let all_hits = [&vec_hits, &bm25_hits, &git_hits];
     let mut payloads: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
-
-    for (rank, hit) in vec_hits.iter().enumerate() {
-        let rrf = 1.0 / (60.0 + rank as f32);
-        *scores.entry(hit.id.clone()).or_insert(0.0) += rrf;
-        payloads.entry(hit.id.clone()).or_insert(hit.payload.clone());
-    }
-    for (rank, hit) in bm25_hits.iter().enumerate() {
-        let rrf = 1.0 / (60.0 + rank as f32);
-        *scores.entry(hit.id.clone()).or_insert(0.0) += rrf;
-        payloads.entry(hit.id.clone()).or_insert(hit.payload.clone());
-    }
-    for (rank, hit) in git_hits.iter().enumerate() {
-        let rrf = 1.0 / (60.0 + rank as f32);
-        *scores.entry(hit.id.clone()).or_insert(0.0) += rrf;
-        payloads.entry(hit.id.clone()).or_insert(hit.payload.clone());
+    for source in &all_hits {
+        for hit in source.iter() {
+            payloads.entry(hit.id.clone()).or_insert_with(|| hit.payload.clone());
+        }
     }
 
-    let mut results: Vec<HostHit> = scores.into_iter()
+    let ranked_lists: Vec<Vec<String>> = all_hits.iter()
+        .map(|source| source.iter().map(|h| h.id.clone()).collect())
+        .collect();
+
+    let mut results: Vec<HostHit> = crate::fusion::rrf_merge_n(&ranked_lists)
+        .into_iter()
+        .take(k as usize)
         .map(|(id, score)| HostHit {
             payload: payloads.remove(&id).unwrap_or(serde_json::Value::Null),
             id,
-            score,
+            score: score as f32,
         })
         .collect();
     results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-    results.truncate(k as usize);
     results
 }

@@ -35,6 +35,18 @@ pub fn fuse(bm25_ranked: &[String], vector_ranked: &[String], query: &str) -> Ve
     rrf_merge(bm25_ranked, vector_ranked, bm25_w, 1.0)
 }
 
+pub fn rrf_merge_n(ranked_lists: &[Vec<String>]) -> Vec<(String, f64)> {
+    let mut scores: HashMap<String, f64> = HashMap::new();
+    for ranked in ranked_lists {
+        for (rank, id) in ranked.iter().enumerate() {
+            *scores.entry(id.clone()).or_insert(0.0) += 1.0 / (RRF_K + (rank + 1) as f64);
+        }
+    }
+    let mut out: Vec<(String, f64)> = scores.into_iter().collect();
+    out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    out
+}
+
 pub fn normalize_scores(scored: &[(String, f64)]) -> Vec<(String, f64)> {
     let max = scored.iter().map(|(_, s)| *s).fold(0f64, f64::max);
     if max <= 0.0 { return scored.to_vec(); }
