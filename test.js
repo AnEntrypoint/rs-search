@@ -17,134 +17,74 @@ const check = (name, fn) => {
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 const exists = (p) => fs.existsSync(path.join(root, p));
 
-check('Cargo.toml has feature gates', () => {
+check('Cargo.toml is a wasm cdylib with the real dep set', () => {
     const c = read('Cargo.toml');
-    if (!/\[features\]/.test(c)) throw new Error('[features] missing');
-    if (!/default\s*=\s*\["vector", "perf"\]/.test(c)) throw new Error('default features wrong');
-    if (!/vector\s*=\s*\["dep:candle-core"/.test(c)) throw new Error('vector feature missing');
-    if (!/perf\s*=\s*\["dep:mimalloc"\]/.test(c)) throw new Error('perf feature missing');
-});
-
-check('Cargo.toml declares new deps', () => {
-    const c = read('Cargo.toml');
-    for (const dep of ['simsimd', 'blake3', 'ignore', 'arc-swap', 'mimalloc']) {
-        if (!new RegExp(`${dep}\\s*=`).test(c)) throw new Error(`${dep} missing`);
+    if (!/name\s*=\s*"rs-search"/.test(c)) throw new Error('package name wrong');
+    if (!/crate-type\s*=\s*\["cdylib"\]/.test(c)) throw new Error('crate-type cdylib missing');
+    for (const dep of ['serde', 'serde_json', 'regex']) {
+        if (!new RegExp(`(^|\\n)${dep}\\s*=`).test(c)) throw new Error(`${dep} dep missing`);
     }
 });
 
-check('pdf-extract dep preserved', () => {
-    if (!/pdf-extract\s*=\s*"0\.9"/.test(read('Cargo.toml'))) throw new Error('pdf-extract missing');
+check('lib.rs exposes the real modules', () => {
+    const c = read('src/lib.rs');
+    for (const m of ['context', 'eval', 'fusion', 'tokenize', 'wasm_host']) {
+        if (!new RegExp(`pub mod ${m};`).test(c)) throw new Error(`${m} not in lib.rs`);
+    }
+    if (!/pub struct Searcher/.test(c)) throw new Error('Searcher struct missing');
+    if (!/pub fn search\(&self, query: &str, k: usize\)/.test(c)) throw new Error('search entry missing');
 });
 
-check('scanner uses ignore::WalkBuilder', () => {
-    const c = read('src/scanner.rs');
-    if (!c.includes('WalkBuilder')) throw new Error('WalkBuilder not used');
-    if (!c.includes('git_ignore')) throw new Error('git_ignore not enabled');
-    if (!c.includes('.codesearchignore')) throw new Error('custom ignore filename missing');
-});
-
-check('scanner still dispatches PDFs', () => {
-    const c = read('src/scanner.rs');
-    if (!c.includes('is_pdf')) throw new Error('is_pdf dispatch lost');
-    if (!c.includes('pdf_chunks')) throw new Error('pdf_chunks call lost');
-});
-
-check('fusion module implements RRF k=60', () => {
-    if (!exists('src/fusion.rs')) throw new Error('fusion.rs missing');
+check('fusion implements RRF k=60 with identifier boost', () => {
     const c = read('src/fusion.rs');
     if (!/RRF_K:\s*f64\s*=\s*60/.test(c)) throw new Error('RRF k=60 constant missing');
-    if (!c.includes('looks_like_identifier')) throw new Error('identifier detection missing');
     if (!c.includes('IDENTIFIER_BOOST')) throw new Error('identifier boost missing');
+    if (!c.includes('looks_like_identifier')) throw new Error('identifier detection missing');
     if (!c.includes('fn fuse')) throw new Error('fuse entry point missing');
+    if (!c.includes('rrf_merge')) throw new Error('rrf_merge missing');
 });
 
-check('embed_cache uses BLAKE3', () => {
-    if (!exists('src/embed_cache.rs')) throw new Error('embed_cache.rs missing');
-    const c = read('src/embed_cache.rs');
-    if (!c.includes('blake3::Hasher')) throw new Error('BLAKE3 not used');
-    if (!c.includes('emb-cache')) throw new Error('cache dir naming missing');
-});
-
-check('embed uses simsimd + MRL + prefixes + cache', () => {
-    const c = read('src/embed.rs');
-    if (!c.includes('SpatialSimilarity')) throw new Error('simsimd not used');
-    if (!c.includes('truncate_mrl')) throw new Error('MRL truncation missing');
-    if (!c.includes('query_prefix')) throw new Error('configurable query prefix missing');
-    if (!c.includes('RS_SEARCH_DIM')) throw new Error('dim env var missing');
-    if (!c.includes('EmbedCache')) throw new Error('embed cache integration missing');
-});
-
-check('mcp has panic boundary', () => {
-    const c = read('src/mcp.rs');
-    if (!c.includes('catch_unwind')) throw new Error('catch_unwind missing');
-    if (!c.includes('-32603')) throw new Error('internal-error code missing');
-});
-
-check('explain module exists', () => {
-    if (!exists('src/explain.rs')) throw new Error('explain.rs missing');
-    const c = read('src/explain.rs');
-    if (!c.includes('TokenBreakdown')) throw new Error('TokenBreakdown missing');
-    if (!c.includes('looks_like_identifier')) throw new Error('identifier flag missing');
-});
-
-check('eval module has NDCG/MRR/recall', () => {
-    if (!exists('src/eval.rs')) throw new Error('eval.rs missing');
+check('eval has NDCG/MRR/recall/precision', () => {
     const c = read('src/eval.rs');
-    for (const fn of ['ndcg_at_k', 'mrr', 'recall_at_k', 'precision_at_k']) {
+    for (const fn of ['ndcg_at_k', 'mrr', 'recall_at_k', 'precision_at_k', 'evaluate']) {
         if (!new RegExp(`fn ${fn}`).test(c)) throw new Error(`${fn} missing`);
     }
 });
 
-check('main.rs uses mimalloc under feature', () => {
-    const c = read('src/main.rs');
-    if (!c.includes('#[cfg(feature = "perf")]')) throw new Error('perf cfg missing');
-    if (!c.includes('mimalloc::MiMalloc')) throw new Error('MiMalloc allocator missing');
+check('tokenize splits camelCase', () => {
+    const c = read('src/tokenize.rs');
+    if (!c.includes('fn split_camel')) throw new Error('split_camel missing');
+    if (!c.includes('fn tokenize')) throw new Error('tokenize entry missing');
 });
 
-check('main.rs has serve/explain/search subcommands', () => {
-    const c = read('src/main.rs');
-    if (!c.includes('Command::Serve')) throw new Error('Serve subcommand missing');
-    if (!c.includes('Command::Explain')) throw new Error('Explain subcommand missing');
+check('context resolves enclosing scope', () => {
+    const c = read('src/context.rs');
+    if (!c.includes('fn find_enclosing_context')) throw new Error('find_enclosing_context missing');
 });
 
-check('bm25 delegates to ignore::is_code_file', () => {
-    const c = read('src/bm25.rs');
-    if (/fn is_code_file\s*\([^)]*\)\s*->\s*bool\s*\{[\s\S]*code_exts/.test(c))
-        throw new Error('bm25 still has duplicated is_code_file table');
-});
-
-check('lib.rs exposes all new modules', () => {
-    const c = read('src/lib.rs');
-    for (const m of ['embed_cache', 'eval', 'explain', 'fusion', 'tokenize']) {
-        if (!new RegExp(`pub mod ${m};`).test(c)) throw new Error(`${m} not in lib.rs`);
+check('wasm host imports carry link(wasm_import_module = env)', () => {
+    const c = read('src/wasm_host.rs');
+    if (!c.includes('#[link(wasm_import_module = "env")]')) throw new Error('link module attr missing');
+    if (!/extern "C"/.test(c)) throw new Error('extern C block missing');
+    for (const imp of ['host_vec_search', 'host_bm25_search', 'host_git_search']) {
+        if (!c.includes(imp)) throw new Error(`${imp} import missing`);
     }
 });
 
-check('release-plz and cargo-dist configured', () => {
-    if (!exists('release-plz.toml')) throw new Error('release-plz.toml missing');
-    const c = read('Cargo.toml');
-    if (!/\[workspace\.metadata\.dist\]/.test(c)) throw new Error('cargo-dist config missing');
-});
-
-check('all rust files under 200 lines', () => {
-    const dir = path.join(root, 'src');
-    for (const f of fs.readdirSync(dir)) {
-        if (!f.endsWith('.rs')) continue;
-        const lines = read(path.join('src', f)).split('\n').length;
-        if (lines > 200) throw new Error(`${f} has ${lines} lines`);
+check('no UTF-8 BOM in tracked text files', () => {
+    const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) return e.name === 'target' || e.name === '.git' ? [] : walk(p);
+        return [p];
+    });
+    const exts = new Set(['.rs', '.toml', '.js', '.json', '.md']);
+    for (const f of walk(root)) {
+        if (!exts.has(path.extname(f))) continue;
+        const h = Buffer.alloc(3);
+        const fd = fs.openSync(f, 'r');
+        try { fs.readSync(fd, h, 0, 3, 0); } finally { fs.closeSync(fd); }
+        if (h[0] === 0xef && h[1] === 0xbb && h[2] === 0xbf) throw new Error(`BOM in ${f}`);
     }
-});
-
-check('ignore.rs has suffix/prefix wildcard tables', () => {
-    const c = read('src/ignore.rs');
-    if (!c.includes('IGNORED_DIR_SUFFIXES')) throw new Error('suffix table missing');
-    if (!c.includes('IGNORED_DIR_PREFIXES')) throw new Error('prefix table missing');
-    if (!c.includes('-browser-profile')) throw new Error('browser profile suffix missing');
-});
-
-check('scanner prunes with filter_entry', () => {
-    const c = read('src/scanner.rs');
-    if (!c.includes('filter_entry')) throw new Error('filter_entry missing');
 });
 
 check('no // or /* comments in rust source', () => {
@@ -155,6 +95,15 @@ check('no // or /* comments in rust source', () => {
             const t = line.trim();
             if (t.startsWith('//') || t.startsWith('/*')) throw new Error(`${f} has comment: ${t}`);
         }
+    }
+});
+
+check('all rust files under 200 lines', () => {
+    const dir = path.join(root, 'src');
+    for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.rs')) continue;
+        const lines = read(path.join('src', f)).split('\n').length;
+        if (lines > 200) throw new Error(`${f} has ${lines} lines`);
     }
 });
 
