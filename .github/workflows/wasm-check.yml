@@ -24,3 +24,13 @@ jobs:
         with:
           key: wasm-check-wasm32-wasip1
       - run: cargo check --target wasm32-wasip1 --no-default-features --features wasm --lib
+
+  search-quality-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: search-quality-eval-native
+      - run: cargo test --lib
