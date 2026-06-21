@@ -71,10 +71,14 @@ pub fn git_search(query: &str, k: u32, root: &str) -> Result<Vec<HostHit>, Strin
         .map_err(|e| format!("host_git_search decode: {}", e))
 }
 
+const CANDIDATE_MULTIPLIER: u32 = 5;
+const CANDIDATE_FLOOR: u32 = 50;
+
 pub fn fusion_search(query: &str, k: u32, root: &str) -> Vec<HostHit> {
-    let vec_hits = vec_search(query, k).unwrap_or_else(|e| { log(&format!("search error vec: {}", e)); vec![] });
-    let bm25_hits = bm25_search(query, k, root).unwrap_or_else(|e| { log(&format!("search error bm25: {}", e)); vec![] });
-    let git_hits = git_search(query, k, root).unwrap_or_else(|e| { log(&format!("search error git: {}", e)); vec![] });
+    let cand_k = k.saturating_mul(CANDIDATE_MULTIPLIER).max(CANDIDATE_FLOOR);
+    let vec_hits = vec_search(query, cand_k).unwrap_or_else(|e| { log(&format!("search error vec: {}", e)); vec![] });
+    let bm25_hits = bm25_search(query, cand_k, root).unwrap_or_else(|e| { log(&format!("search error bm25: {}", e)); vec![] });
+    let git_hits = git_search(query, cand_k, root).unwrap_or_else(|e| { log(&format!("search error git: {}", e)); vec![] });
 
     let all_hits = [&vec_hits, &bm25_hits, &git_hits];
     let mut payloads: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
