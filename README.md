@@ -1,192 +1,46 @@
 # rs-search
 
-Hybrid **BM25 + vector** code search for codebases, as a CLI and an **MCP** server. Pure-Rust scanner with `.gitignore` discipline, PDF ingestion, content-addressable embedding cache, and Reciprocal Rank Fusion.
+A small Rust crate compiled to a WebAssembly `cdylib`. It provides the search-fusion and text-analysis pieces consumed inside the plugkit WASM stack. It is not a standalone tool: there is no CLI, no MCP server, no embedding model, and no installable binary.
 
-- BM25 lexical scoring with identifier-aware tokenization (snake / kebab / camel splits)
-- Vector reranking via [`nomic-embed-text-v1.5`](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) (GGUF, loaded with `candle-core`)
-- RRF fusion (`k=60`) over BM25, vector, and git sources
-- `.pdf` is a first-class search target — pages render as `doc.pdf:<page>`
-- MCP stdio server with per-call `project_root` / `index` / `discipline` resolution
-- Git-commit search: top-N commits ranked against the same query, BM25 + vector
+The crate ranks results by Reciprocal Rank Fusion over candidate lists supplied by the WASM host, plus supporting tokenization, enclosing-context detection, and offline evaluation metrics.
 
----
+## Dependencies
 
-## Installation
+`serde`, `serde_json`, `regex`. Nothing else.
 
-`rs-search` requires the **nightly** Rust toolchain (`rust-toolchain.toml` pins it) and, on Windows, **MSVC** `cl.exe` for `onig_sys`. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the full Windows env recipe.
-
-```bash
-cargo +nightly install --git https://github.com/AnEntrypoint/rs-search rs-search
-```
-
-Or build from source:
-
-```bash
-git clone https://github.com/AnEntrypoint/rs-search.git
-cd rs-search
-cargo build --release
-```
-
-Pre-built artifacts (`x86_64`/`aarch64` for Linux / macOS / Windows-MSVC) ship via `cargo-dist` on tagged releases.
-
----
-
-## CLI
-
-```text
-rs-search [--root DIR] [--index DIR] [--discipline NAME] <subcommand>
-
-Subcommands:
-  search <query...>     Run a one-shot hybrid search and print BM25 + vector results
-  explain <query...>    Per-token IDF, doc-freq, RRF weights, matched tokens per hit
-  serve                 Run the MCP stdio server (also the default when no args given)
-
-Flags:
-  --root DIR            Project root (defaults to cwd)
-  --index DIR           Explicit index directory; wins over --discipline
-  --discipline NAME     Resolves to <root>/.gm/disciplines/<name>/code-search
-  --features            Print enabled build features and exit
-```
-
-Examples:
-
-```bash
-# One-shot search in the current dir
-rs-search search "reciprocal rank fusion"
-
-# Explicit root and index dir
-rs-search --root ./repo --index ./.code-search search query
-
-# Per-token diagnostics
-rs-search explain "tokenize identifier"
-
-# MCP stdio server
-rs-search serve
-```
-
-Positional queries also work without the `search` keyword (`rs-search foo bar`).
-
----
-
-## MCP server
-
-`rs-search serve` speaks JSON-RPC 2.0 over stdio. It exposes a `search` tool whose arguments can override project root, index dir, and discipline on a **per-call** basis — one server can index many roots.
-
-- Tool input schema caps `query` length at 8192 chars.
-- `tools/call` is wrapped in `std::panic::catch_unwind`; handler panics emit a JSON-RPC `-32603` error instead of killing the session.
-- Results stream only **after** the scan + embed + sweep pass completes — no partial snapshots.
-
----
-
-## Architecture
-
-```
-            ┌────────────────────────────┐
-  query ──▶ │ tokenize (camel/kebab/snake)│──┐
-            └────────────────────────────┘  │
-                                             ▼
-                                  ┌──────────────────┐
-                                  │ BM25 (lexical)   │──┐
-                                  └──────────────────┘  │
-                                                        ▼
-                                              ┌──────────────────┐
-                                              │ RRF fusion (k=60)│──▶ results
-                                              └──────────────────┘
-                                                        ▲
-                                  ┌──────────────────┐  │
-                                  │ vector rerank    │──┘
-                                  │ (nomic-embed)    │
-                                  └──────────────────┘
-```
-
-### Scanner (`src/scanner.rs`)
-
-Uses `ignore::WalkBuilder` (the ripgrep / fd crate). Honors `.gitignore`, `.git/info/exclude`, global gitignore, and `.codesearchignore` out of the box, with an extra `IGNORED_DIRS` allowlist for vendored caches. Files are split into ~40-line overlapping chunks. PDF files dispatch to `src/pdf.rs`.
-
-### Embedder (`src/embed.rs`)
-
-- Model file: `nomic-embed-text-v1.5.Q4_K_M.gguf` (split across 6 part files under `models/`)
-- Loader: `gguf_file::Content::read` → dequantize → `VarBuilder::from_tensors` → `NomicBertModel`
-- Mean-pool + L2-normalize on the way out
-- Tokenizer: BERT WordPiece from a bundled `models/tokenizer.json` (`include_bytes!`)
-- Lazy: initialized via `OnceLock<Result<Embedder, String>>` on first query
-- SIMD cosine via `simsimd::SpatialSimilarity::cosine` with scalar fallback
+## What it does
 
 ### Fusion (`src/fusion.rs`)
 
-Reciprocal Rank Fusion with `RRF_K = 60`. The live fused path (`rrf_merge_n`) merges the BM25, vector, and git ranked lists with equal weight and returns raw RRF scores. A weighted variant (`fuse` / `rrf_merge`) that applies a `1.5×` BM25 boost for identifier-shaped queries (`looks_like_identifier`) and `normalize_scores` to `[0, 1]` exists in this module but is not yet wired into the fused query path; wiring it requires a measured search-quality evaluation first.
+Reciprocal Rank Fusion with `RRF_K = 60`. The live fused path is `rrf_merge_n`, which merges any number of ranked id lists with equal weight and returns raw RRF scores.
 
-### Embedding cache (`src/embed_cache.rs`)
+A weighted variant (`fuse` / `rrf_merge`) that applies a `1.5x` BM25 boost for identifier-shaped queries (`looks_like_identifier`, gated by `IDENTIFIER_BOOST`) and a `normalize_scores` helper that scales scores to `[0, 1]` also exist in this module, but are NOT yet wired into the live fused path; wiring them requires a measured search-quality evaluation first.
 
-Content-addressable, keyed by `BLAKE3(model_tag || dim || text)`. Two tiers:
+### Tokenization (`src/tokenize.rs`)
 
-- In-memory `Mutex<HashMap>` per process
-- On-disk `f32` blobs under `<index>/emb-cache/<hex>.bin`
+`tokenize` splits text into lowercased tokens, with identifier-aware splitting: camelCase boundaries (`split_camel`) plus kebab/snake/dot separators. Tokens shorter than 2 chars are dropped; output is deduplicated and sorted.
 
-Dim is part of the key, so Matryoshka truncation (`RS_SEARCH_DIM=256`) gets its own cache lane. Orphan sweep runs at end of each full search.
+### Enclosing context (`src/context.rs`)
 
-### PDF ingest (`src/pdf.rs`)
+`find_enclosing_context` scans upward from a target line to find the nearest enclosing function, class, struct, or `impl` name, used to label snippets. A regex matches `function`/`class`/`const|let|var = (`/`fn`/`struct`/`impl` declarations and skips language keywords. `get_file_total_lines` reads a file relative to a root and returns its line count.
 
-- Crate: `pdf-extract = "0.9"` (pure Rust, no C deps)
-- Splits on form-feed (`\x0c`) → one `Chunk` per page
-- Each page chunk has `line_start = line_end = page_number`
-- Cache at `<index>/pdf-cache/<hash>.json` keyed on `abs_path + mtime`
-- Honors the 50 MB file cap; encrypted / scanned-only / malformed PDFs yield zero chunks silently (no OCR)
+### Evaluation metrics (`src/eval.rs`)
 
----
+Offline ranking metrics against a qrels map: `ndcg_at_k`, `mrr`, `recall_at_k`, `precision_at_k`, plus `dcg`. `evaluate` aggregates NDCG@10, MRR, Recall@100, and P@10 into an `EvalReport`, and `format_report` renders it as text. Plug in qrels to gate ranking-quality regressions.
 
-## Environment variables
+### Host boundary (`src/wasm_host.rs`)
 
-| Var | Default | Effect |
-|---|---|---|
-| `RS_SEARCH_DIM` | full | Matryoshka truncation — slice the vector to N dims and renormalize |
-| `RS_SEARCH_QUERY_PREFIX` | `search_query: ` | Embedder prefix applied to query text |
-| `RS_SEARCH_DOC_PREFIX` | `search_document: ` | Embedder prefix applied to chunk text |
+Declares the host imports under `wasm_import_module = "env"`: `host_vec_search`, `host_bm25_search`, `host_git_search`, `host_log`, `host_now_ms`. Each returns a packed `(ptr, len)` `u64` that is unpacked and decoded as a JSON `Vec<HostHit>`.
 
-The defaults match `nomic-embed-text-v1.5`. For CodeRankEmbed swap the query prefix to `Represent this query for searching relevant code: `.
+`fusion_search(query, k, root)` is the live entry: it asks the host for vector, BM25, and git candidates (candidate count is `k * 5` floored at 50), collects their payloads, merges the three ranked lists with `rrf_merge_n`, takes the top `k`, and sorts by score then id.
 
----
+### Public API (`src/lib.rs`)
 
-## Feature gates
+`Searcher::new(root)` and `Searcher::search(query, k)` drive `fusion_search` and map the host hits into `SearchHit { id, score, snippet }`, pulling `snippet` out of each hit payload. `k == 0` returns empty.
 
-| Feature | Default | Pulls in |
-|---|---|---|
-| `vector` | yes | `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers`, `libsql`, `tokio` |
-| `perf` | yes | `mimalloc` as `#[global_allocator]` |
-| `pdf` | yes | `pdf-extract` |
-| `simd` | yes | `simsimd` SIMD cosine |
+## Build and ship
 
-Disabling `vector` shrinks the binary to a pure-Rust BM25 + RRF + PDF scanner.
-
----
-
-## Build constraints
-
-### Nightly required
-
-`candle-core` 0.10 uses `usize::is_multiple_of()` (rust-lang/rust#128101), unstable under `unsigned_is_multiple_of`. Stable rustc rejects this with `E0658` even on 1.94.1. The project pins nightly via `rust-toolchain.toml`; CI uses `dtolnay/rust-toolchain@nightly`.
-
-### Windows: MSVC
-
-`candle-core` → `tokenizers[onig]` → `oniguruma` (C). The C build runs through MSVC, not MinGW. Local Windows dev needs Visual Studio Build Tools with the C++ workload (`cl.exe` on `PATH`). `windows-latest` runners have it pre-installed.
-
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for explicit `RUSTC` / `CC` / `INCLUDE` / `LIB` env setup.
-
----
-
-## Eval harness
-
-`src/eval.rs` exports `ndcg_at_k`, `mrr`, `recall_at_k`, `precision_at_k`, and an `EvalReport` aggregator — plug in BEIR / CoIR qrels to gate NDCG@10 regressions in CI.
-
----
-
-## Releases
-
-- [`release-plz.toml`](./release-plz.toml) — conventional-commit-driven changelog and version-bump PRs
-- `[workspace.metadata.dist]` in `Cargo.toml` — cross-platform binaries via `cargo-dist`
-- [`.github/workflows/`](./.github/workflows) — `build.yml`, `cascade.yml`, `gh-pages.yml`, `auto-declaudeify.yml`
-
----
+This is a WASM `cdylib` (`crate-type = ["cdylib"]`, `wasm` feature). It builds and ships through the WASM cascade: pushing to this repo triggers `.github/workflows/cascade.yml`, and `.github/workflows/wasm-check.yml` validates the WASM build. No local `cargo build`/`cargo install`, no published binary, no standalone install.
 
 ## License
 

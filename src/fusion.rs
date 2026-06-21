@@ -26,7 +26,7 @@ pub fn rrf_merge(
         *scores.entry(id.clone()).or_insert(0.0) += vector_weight / (RRF_K + (rank + 1) as f64);
     }
     let mut out: Vec<(String, f64)> = scores.into_iter().collect();
-    out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0)));
     out
 }
 
@@ -43,7 +43,7 @@ pub fn rrf_merge_n(ranked_lists: &[Vec<String>]) -> Vec<(String, f64)> {
         }
     }
     let mut out: Vec<(String, f64)> = scores.into_iter().collect();
-    out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0)));
     out
 }
 

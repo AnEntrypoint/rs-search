@@ -23,8 +23,12 @@ impl Searcher {
     }
 
     pub fn search(&self, query: &str, k: usize) -> Vec<SearchHit> {
+        if k == 0 {
+            return Vec::new();
+        }
+        let k_u32 = u32::try_from(k).unwrap_or(u32::MAX);
         let root_str = self.root.to_string_lossy();
-        let hits = wasm_host::fusion_search(query, k as u32, &root_str);
+        let hits = wasm_host::fusion_search(query, k_u32, &root_str);
         hits.into_iter()
             .map(|h| {
                 let snippet = h

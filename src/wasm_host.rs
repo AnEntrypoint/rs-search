@@ -101,6 +101,6 @@ pub fn fusion_search(query: &str, k: u32, root: &str) -> Vec<HostHit> {
             score: score as f32,
         })
         .collect();
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.id.cmp(&b.id)));
     results
 }
