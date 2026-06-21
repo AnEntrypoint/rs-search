@@ -20,11 +20,6 @@ pub fn find_enclosing_context(content: &str, line_start: usize) -> Option<String
     None
 }
 
-pub fn get_file_total_lines(root: &std::path::Path, rel_path: &str) -> Option<usize> {
-    let full = root.join(rel_path.replace('/', std::path::MAIN_SEPARATOR_STR));
-    std::fs::read_to_string(full).ok().map(|c| c.split('\n').count())
-}
-
 #[cfg(test)]
 mod context_eval {
     use super::find_enclosing_context;
