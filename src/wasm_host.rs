@@ -92,7 +92,8 @@ pub fn fusion_search(query: &str, k: u32, root: &str) -> Vec<HostHit> {
         .map(|source| source.iter().map(|h| h.id.clone()).collect())
         .collect();
 
-    let mut results: Vec<HostHit> = crate::fusion::rrf_merge_n(&ranked_lists)
+    let weights = [1.0, crate::fusion::IDENTIFIER_BOOST, 1.0];
+    let mut results: Vec<HostHit> = crate::fusion::fuse_n(&ranked_lists, &weights, query)
         .into_iter()
         .take(k as usize)
         .map(|(id, score)| HostHit {
