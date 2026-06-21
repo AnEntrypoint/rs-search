@@ -4,7 +4,7 @@ Hybrid **BM25 + vector** code search for codebases, as a CLI and an **MCP** serv
 
 - BM25 lexical scoring with identifier-aware tokenization (snake / kebab / camel splits)
 - Vector reranking via [`nomic-embed-text-v1.5`](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5) (GGUF, loaded with `candle-core`)
-- RRF fusion (`k=60`) with a `1.5×` BM25 boost for identifier-shaped queries
+- RRF fusion (`k=60`) over BM25, vector, and git sources
 - `.pdf` is a first-class search target — pages render as `doc.pdf:<page>`
 - MCP stdio server with per-call `project_root` / `index` / `discipline` resolution
 - Git-commit search: top-N commits ranked against the same query, BM25 + vector
@@ -114,7 +114,7 @@ Uses `ignore::WalkBuilder` (the ripgrep / fd crate). Honors `.gitignore`, `.git/
 
 ### Fusion (`src/fusion.rs`)
 
-Reciprocal Rank Fusion with `RRF_K = 60`. `looks_like_identifier(query)` (snake / kebab / dotted / camel without spaces) triggers a `1.5×` weight on the BM25 rank. Output normalized to `[0, 1]`.
+Reciprocal Rank Fusion with `RRF_K = 60`. The live fused path (`rrf_merge_n`) merges the BM25, vector, and git ranked lists with equal weight and returns raw RRF scores. A weighted variant (`fuse` / `rrf_merge`) that applies a `1.5×` BM25 boost for identifier-shaped queries (`looks_like_identifier`) and `normalize_scores` to `[0, 1]` exists in this module but is not yet wired into the fused query path; wiring it requires a measured search-quality evaluation first.
 
 ### Embedding cache (`src/embed_cache.rs`)
 

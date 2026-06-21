@@ -1,7 +1,7 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
-static SKIP: &[&str] = &["if","for","while","switch","catch","else"];
+static SKIP: &[&str] = &["if","for","while","switch","catch","else","return","await","do","match","yield","typeof","new","delete","void","in","of"];
 static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|\s)(?:async\s+)?(?:function\s+(\w+)|class\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(|(?:static\s+)?(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{|fn\s+(\w+)|struct\s+(\w+)|impl\s+(\w+))").expect("static regex"));
 
 pub fn find_enclosing_context(content: &str, line_start: usize) -> Option<String> {
