@@ -1,3 +1,8 @@
+//! Standalone IR-evaluation harness (NDCG/MRR/Recall/Precision) for offline
+//! benchmarking against qrels. Not part of the wasm dispatch surface and not
+//! called from any bin/example in this crate; invoke manually from a
+//! scratch bin or `cargo run --example` when scoring a ranked result set.
+
 use std::collections::HashMap;
 
 pub fn dcg(rels: &[f64]) -> f64 {
