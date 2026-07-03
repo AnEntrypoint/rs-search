@@ -4,11 +4,24 @@ use std::sync::LazyLock;
 static SKIP: &[&str] = &["if","for","while","switch","catch","else","return","await","do","match","yield","typeof","new","delete","void","in","of"];
 static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|\s)(?:async\s+)?(?:function\s+(\w+)|class\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(|(?:static\s+)?(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{|fn\s+(\w+)|struct\s+(\w+)|impl\s+(\w+))").expect("static regex"));
 
+fn looks_like_continued_signature(line: &str) -> bool {
+    let trimmed = line.trim_end();
+    trimmed.ends_with('(') || trimmed.ends_with(',')
+}
+
 pub fn find_enclosing_context(content: &str, line_start: usize) -> Option<String> {
     let lines: Vec<&str> = content.split('\n').collect();
     let target = (line_start.saturating_sub(1)).min(lines.len().saturating_sub(1));
-    for i in (0..=target).rev() {
-        if let Some(caps) = RE.captures(lines[i]) {
+    let mut i = target as isize;
+    while i >= 0 {
+        let idx = i as usize;
+        let mut accum = lines[idx].to_string();
+        let mut k = idx;
+        while looks_like_continued_signature(&lines[k]) && k > 0 {
+            k -= 1;
+            accum = format!("{} {}", lines[k].trim_end(), accum.trim_start());
+        }
+        if let Some(caps) = RE.captures(&accum) {
             for j in 1..caps.len() {
                 if let Some(m) = caps.get(j) {
                     let name = m.as_str();
@@ -16,6 +29,7 @@ pub fn find_enclosing_context(content: &str, line_start: usize) -> Option<String
                 }
             }
         }
+        i = k as isize - 1;
     }
     None
 }

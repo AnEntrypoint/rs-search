@@ -16,8 +16,25 @@ pub fn unpack(packed: u64) -> (u32, u32) {
     (ptr, len)
 }
 
-const MAX_HOST_RESPONSE_BYTES: u32 = 256 * 1024 * 1024;
+const MAX_HOST_RESPONSE_BYTES: u32 = 32 * 1024 * 1024;
 
+// SAFETY: ptr/len cross the wasm-host ABI boundary from plugkit-wasm-wrapper.js,
+// a host we control (not arbitrary/untrusted wasm callers). There is no way for
+// guest code to independently verify the pointer targets a live, correctly
+// aligned allocation of at least `len` bytes -- that guarantee comes entirely
+// from the wrapper's own packing (`(ptr | len << 32)` over its own buffer) and
+// from the wasm32 linear-memory model, where every host-visible ptr is a
+// byte-aligned offset into the single sandboxed memory (so u8 alignment is
+// always satisfied). The len sanity bound below is not a validity check --
+// it is a defense against a corrupted/misbehaving host packing an absurd len
+// and this code reading far past the actual response, capped at a size no
+// legitimate search-index blob (hit list, bm25/git result JSON) should exceed.
+//
+// No free call after the copy: this is the same host_vec_search-family
+// convention rs-plugkit's wasm_dispatch.rs uses (unpack_to_value/unpack_to_string
+// never free either) -- the JS host retains and manages this buffer itself,
+// unlike rs-exec's separate rs_exec_alloc/rs_exec_free pair, which exists only
+// for buffers the wasm side itself allocated via rs_exec_alloc.
 unsafe fn take_bytes(packed: u64) -> Result<Vec<u8>, String> {
     let (ptr, len) = unpack(packed);
     if ptr == 0 || len == 0 {
@@ -81,9 +98,29 @@ const CANDIDATE_FLOOR: u32 = 50;
 
 pub fn fusion_search(query: &str, k: u32, root: &str) -> Vec<HostHit> {
     let cand_k = k.saturating_mul(CANDIDATE_MULTIPLIER).max(CANDIDATE_FLOOR);
-    let vec_hits = vec_search(query, cand_k).unwrap_or_else(|e| { log(&format!("search error vec: {}", e)); vec![] });
-    let bm25_hits = bm25_search(query, cand_k, root).unwrap_or_else(|e| { log(&format!("search error bm25: {}", e)); vec![] });
-    let git_hits = git_search(query, cand_k, root).unwrap_or_else(|e| { log(&format!("search error git: {}", e)); vec![] });
+    let vec_result = vec_search(query, cand_k);
+    let bm25_result = bm25_search(query, cand_k, root);
+    let git_result = git_search(query, cand_k, root);
+
+    if let Err(e) = &vec_result {
+        log(&format!("search error vec: {}", e));
+    }
+    if let Err(e) = &bm25_result {
+        log(&format!("search error bm25: {}", e));
+    }
+    if let Err(e) = &git_result {
+        log(&format!("search error git: {}", e));
+    }
+    if let (Err(vec_e), Err(bm25_e), Err(git_e)) = (&vec_result, &bm25_result, &git_result) {
+        log(&format!(
+            "fusion_search: all backends failed, returning empty results (vec: {}, bm25: {}, git: {})",
+            vec_e, bm25_e, git_e
+        ));
+    }
+
+    let vec_hits = vec_result.unwrap_or_default();
+    let bm25_hits = bm25_result.unwrap_or_default();
+    let git_hits = git_result.unwrap_or_default();
 
     let all_hits = [&vec_hits, &bm25_hits, &git_hits];
     let mut payloads: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
