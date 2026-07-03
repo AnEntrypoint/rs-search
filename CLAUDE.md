@@ -1,88 +1,53 @@
-# rs-search — Rust CLI/MCP Server for Codebase Search
+@AGENTS.md
 
-Hybrid BM25 + vector semantic search for codebases. Uses candle-core ML framework with nomic-embed-text-v1.5 embeddings.
+# rs-search
 
-## Key Technical Constraints
+A Rust crate compiled to a WebAssembly `cdylib`. It provides search-fusion and text-analysis primitives consumed inside the plugkit WASM stack. There is no CLI, no MCP server, no embedding model, and no installable binary in this repo.
 
-### Nightly Rust Required
-candle-core 0.10.2 uses `usize::is_multiple_of()` (tracking issue #128101), an unstable feature gated under `unsigned_is_multiple_of`. This is rejected by stable Rust (E0658) even on 1.94.1. The project requires nightly toolchain.
+## Dependencies
 
-**Configuration:**
-- `rust-toolchain.toml`: `channel = "nightly"`
-- CI: `dtolnay/rust-toolchain@nightly`
+`serde`, `serde_json`, `regex`. Nothing else — no `candle-core`, no GGUF loading, no oniguruma/MSVC requirement.
 
-### Windows: MSVC cl.exe Required
-`candle-core` → `tokenizers[onig]` → oniguruma C library (cc-rs build). The oniguruma library builds with MSVC, not MinGW. Windows local development requires MSVC cl.exe in PATH (Visual Studio Build Tools with C++ workload). GitHub Actions `windows-latest` has MSVC pre-installed.
+## Toolchain
 
-## PDF Ingestion
+Builds on stable Rust. `rust-toolchain.toml` pins `channel = "stable"`. CI (`dtolnay/rust-toolchain@stable` in `.github/workflows/wasm-check.yml`) validates both the `wasm32-wasip1` target build and the native `cargo test --lib` suite.
 
-`.pdf` files are first-class search targets. The scanner (`src/scanner.rs`) dispatches by extension to `src/pdf.rs::pdf_chunks`, which runs `pdf_extract::extract_text_from_mem` and splits on form-feed (`\x0c`) into one Chunk per page. Each page Chunk carries `line_start = line_end = page_number` — search hits render as `doc.pdf:<page>`.
+## Architecture
 
-- **Crate**: `pdf-extract = "0.9"` — pure Rust, no C deps, builds under MSVC nightly alongside oniguruma.
-- **Cache**: extracted pages persist to `.code-search/pdf-cache/<hash>.json` keyed on `abs_path + mtime`; rescans skip extraction.
-- **Ignore filter**: `.pdf` is in `CODE_EXTENSIONS` and removed from `BINARY_EXTENSIONS` in `src/ignore.rs`. Both changes are required — `should_ignore` rejects anything not in `CODE_EXTENSIONS` *or* present in `BINARY_EXTENSIONS`.
-- **Limits**: honors the existing 50MB cap. Encrypted, scanned-only, or malformed PDFs yield zero chunks silently (no OCR). Digital PDFs extract fully.
+### Host boundary (`src/wasm_host.rs`)
 
-## Vector Search Architecture
+Declares host imports under `#[link(wasm_import_module = "env")]`: `host_vec_search`, `host_bm25_search`, `host_git_search`, `host_log`, `host_now_ms`. Each search import returns a packed `(ptr, len)` `u64`; `take_bytes` unpacks and copies the bytes (bounded, error-returning — a malformed host response surfaces as a `Result::Err`, never a raw slice trap), and the caller decodes it as a JSON `Vec<HostHit>`.
 
-### Embedding Model
-- **File**: nomic-embed-text-v1.5.Q4_K_M.gguf (split into 6 parts for size)
-- **Loading**: `gguf_file::Content::read` → dequantize tensors → `VarBuilder::from_tensors` → `NomicBertModel`
-- **Computation**: mean-pooling + L2 normalization
-- **Code**: `src/embed.rs`
+`fusion_search(query, k, root)` is the live entry point: it requests vector, BM25, and git candidate lists from the host (candidate count `k * 5` floored at 50), collects payloads, and merges the three ranked lists via `crate::fusion::fuse_n` with per-source weights (`[1.0, IDENTIFIER_BOOST, 1.0]`), taking the top `k`.
 
-### Tokenization
-- **File**: `models/tokenizer.json` (711KB, bundled via `include_bytes!`)
-- **Type**: BERT WordPiece (not BPE)
-- **Why separate**: nomic-embed-text-v1.5 requires WordPiece; GGUF-embedded tokenizer only supports BPE
+### Fusion (`src/fusion.rs`)
 
-### Hybrid Scoring — Reciprocal Rank Fusion
-Fusion lives in `src/fusion.rs`. RRF with `k=60` merges BM25 and vector rankings; BM25 gets a `1.5×` weight when `looks_like_identifier(query)` is true (snake_case, kebab-case, dotted, or camelCase without spaces). The final score is normalized to `[0, 1]`.
+Reciprocal Rank Fusion with `RRF_K = 60`. `fuse_n` is the live fused path: it calls `rrf_merge_n_weighted` (applies the `1.5x` `IDENTIFIER_BOOST` to the BM25 list) when `looks_like_identifier(query)` is true, else `rrf_merge_n` (equal weight across all lists). `looks_like_identifier` treats snake_case/kebab-case/dotted/camelCase single-token queries as identifier-shaped, while excluding bare decimal-number tokens (e.g. `3.14`) from the dot-separator check.
 
-### Lazy Initialization
-- Embedder initialized via `OnceLock<Result<Embedder, String>>`
-- Model loaded on first query, not at startup
-- Stored in singleton for reuse across requests
+### Tokenization (`src/tokenize.rs`)
 
-### SIMD Vector Ops
-`embed::cosine` uses `simsimd::SpatialSimilarity::cosine` when SSE is available, with a scalar fallback. Expect 5–20× speedup over hand-rolled scalar math on AVX2/AVX-512/NEON hosts.
+`tokenize` splits text into lowercased tokens, with identifier-aware splitting: camelCase boundaries (`split_camel`) plus kebab/snake/dot separators. Tokens shorter than 2 chars are dropped; output is deduplicated and sorted.
 
-### Content-Addressable Embedding Cache
-`src/embed_cache.rs` keys BLAKE3(`model_tag || dim || text`) → `f32` vector, in-memory (Mutex<HashMap>) + on-disk at `.code-search/emb-cache/<hex>.bin`. Skips re-embedding unchanged chunks across runs. Dim is part of the key so MRL truncation produces a separate cache lane.
+### Enclosing context (`src/context.rs`)
 
-### Matryoshka Truncation
-Set `RS_SEARCH_DIM=256` (or any value less than full dim) and the embedder slices the vector and renormalizes. No retraining needed — nomic-embed-text-v1.5 is MRL-trained.
+`find_enclosing_context` scans upward from a target line to find the nearest enclosing function, class, struct, or `impl` name, used to label snippets.
 
-### Embedder Prompt Prefixes
-Defaults are nomic's `search_query: ` / `search_document: `. Override via `RS_SEARCH_QUERY_PREFIX` and `RS_SEARCH_DOC_PREFIX` for CodeRankEmbed (`Represent this query for searching relevant code: `) or other embedders.
+### Evaluation metrics (`src/eval.rs`)
 
-## Feature Gates
+Offline ranking metrics against a qrels map: `ndcg_at_k`, `mrr`, `recall_at_k`, `precision_at_k`, plus `dcg`. `evaluate` aggregates NDCG@10, MRR, Recall@100, and P@10 into an `EvalReport`.
 
-- `default = ["vector", "perf"]`
-- `vector` — gates `candle-core`, `candle-nn`, `candle-transformers`, `tokenizers`. Disabling shrinks the binary to pure-Rust BM25 + RRF + PDF scan.
-- `perf` — gates `mimalloc` as `#[global_allocator]`. Turn off for musl-only builds or when another allocator is preferred.
+### Public API (`src/lib.rs`)
 
-## Subcommands
+`Searcher::new(root)` and `Searcher::search(query, k)` drive `fusion_search` and map host hits into `SearchHit { id, score, snippet }`. `k == 0` returns empty.
 
-- `rs-search <query...>` — one-shot search (legacy positional).
-- `rs-search search <query...>` — explicit subcommand.
-- `rs-search serve` — MCP stdio server (also the default when no args given).
-- `rs-search explain <query...>` — per-token IDF, doc frequency, RRF weights, matched tokens per result (`src/explain.rs`).
+## Build and ship
 
-## MCP Panic Boundary
+`crate-type = ["cdylib"]`, `wasm` feature. Ships through the WASM cascade: pushing to this repo triggers `.github/workflows/cascade.yml`; `.github/workflows/wasm-check.yml` validates both the wasm target build and the native test suite. No local `cargo build`/`cargo install`, no published binary, no standalone install.
 
-`tools/call` is wrapped in `std::panic::catch_unwind`. A handler panic emits a JSON-RPC `-32603` error instead of killing the session. Query input is capped via `inputSchema.properties.query.maxLength=8192`.
+## Cascade wiring note
 
-## Scanner
+As of this writing, `rs-plugkit` does not depend on this crate — it implements its own host-vec-search-based codesearch directly. This crate's fusion/tokenize/context/eval logic is not currently consumed by the live cascade; fix bugs and keep docs accurate here regardless, since orphaned wiring status does not make the crate's own correctness or documentation less real.
 
-`src/scanner.rs` uses `ignore::WalkBuilder` (ripgrep/fd's crate) with `.gitignore`, `.git/info/exclude`, global gitignore, and `.codesearchignore` all respected out of the box. The custom `IGNORED_DIRS` list still guards against vendored caches even when no ignore file exists.
+## Testing
 
-## Eval Harness
-
-`src/eval.rs` exposes `ndcg_at_k`, `mrr`, `recall_at_k`, `precision_at_k` plus an `EvalReport` aggregator. Plug in BEIR/CoIR qrels to gate NDCG@10 regressions in CI.
-
-## Release Tooling
-
-- `release-plz.toml` — changelog + version-bump PRs driven by conventional commits.
-- `[workspace.metadata.dist]` in `Cargo.toml` — cargo-dist cross-platform artifacts.
-- `.github/workflows/release-plz.yml` — opens release PRs on pushes to `main`.
+No synthetic test files, no test framework. Verification is `cargo test --lib` against the in-module `#[cfg(test)]` blocks (real code, no mocks) plus the single root `test.js` (structural/hygiene checks, mock-free, real file reads).

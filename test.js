@@ -40,8 +40,10 @@ check('fusion implements RRF k=60 with identifier boost', () => {
     if (!/RRF_K:\s*f64\s*=\s*60/.test(c)) throw new Error('RRF k=60 constant missing');
     if (!c.includes('IDENTIFIER_BOOST')) throw new Error('identifier boost missing');
     if (!c.includes('looks_like_identifier')) throw new Error('identifier detection missing');
-    if (!c.includes('fn fuse')) throw new Error('fuse entry point missing');
-    if (!c.includes('rrf_merge')) throw new Error('rrf_merge missing');
+    if (!c.includes('fn fuse_n')) throw new Error('fuse_n entry point missing');
+    if (!c.includes('fn rrf_merge_n_weighted')) throw new Error('rrf_merge_n_weighted missing');
+    if (!c.includes('fn rrf_merge_n')) throw new Error('rrf_merge_n missing');
+    if (c.includes('fn normalize_scores')) throw new Error('dead normalize_scores should be removed');
 });
 
 check('eval has NDCG/MRR/recall/precision', () => {

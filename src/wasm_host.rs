@@ -16,13 +16,18 @@ pub fn unpack(packed: u64) -> (u32, u32) {
     (ptr, len)
 }
 
-unsafe fn take_bytes(packed: u64) -> Vec<u8> {
+const MAX_HOST_RESPONSE_BYTES: u32 = 256 * 1024 * 1024;
+
+unsafe fn take_bytes(packed: u64) -> Result<Vec<u8>, String> {
     let (ptr, len) = unpack(packed);
     if ptr == 0 || len == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
+    }
+    if len > MAX_HOST_RESPONSE_BYTES {
+        return Err(format!("host response len {} exceeds sanity bound {}", len, MAX_HOST_RESPONSE_BYTES));
     }
     let slice = core::slice::from_raw_parts(ptr as *const u8, len as usize);
-    slice.to_vec()
+    Ok(slice.to_vec())
 }
 
 pub fn log(msg: &str) {
@@ -43,7 +48,7 @@ pub struct HostHit {
 
 pub fn vec_search(query: &str, k: u32) -> Result<Vec<HostHit>, String> {
     let packed = unsafe { host_vec_search(query.as_ptr(), query.len() as u32, k) };
-    let raw = unsafe { take_bytes(packed) };
+    let raw = unsafe { take_bytes(packed) }?;
     if raw.is_empty() {
         return Ok(Vec::new());
     }
@@ -53,7 +58,7 @@ pub fn vec_search(query: &str, k: u32) -> Result<Vec<HostHit>, String> {
 
 pub fn bm25_search(query: &str, k: u32, root: &str) -> Result<Vec<HostHit>, String> {
     let packed = unsafe { host_bm25_search(query.as_ptr(), query.len() as u32, k, root.as_ptr(), root.len() as u32) };
-    let raw = unsafe { take_bytes(packed) };
+    let raw = unsafe { take_bytes(packed) }?;
     if raw.is_empty() {
         return Ok(Vec::new());
     }
@@ -63,7 +68,7 @@ pub fn bm25_search(query: &str, k: u32, root: &str) -> Result<Vec<HostHit>, Stri
 
 pub fn git_search(query: &str, k: u32, root: &str) -> Result<Vec<HostHit>, String> {
     let packed = unsafe { host_git_search(query.as_ptr(), query.len() as u32, k, root.as_ptr(), root.len() as u32) };
-    let raw = unsafe { take_bytes(packed) };
+    let raw = unsafe { take_bytes(packed) }?;
     if raw.is_empty() {
         return Ok(Vec::new());
     }

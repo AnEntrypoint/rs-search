@@ -12,9 +12,7 @@ The crate ranks results by Reciprocal Rank Fusion over candidate lists supplied 
 
 ### Fusion (`src/fusion.rs`)
 
-Reciprocal Rank Fusion with `RRF_K = 60`. The live fused path is `rrf_merge_n`, which merges any number of ranked id lists with equal weight and returns raw RRF scores.
-
-A weighted variant (`fuse` / `rrf_merge`) that applies a `1.5x` BM25 boost for identifier-shaped queries (`looks_like_identifier`, gated by `IDENTIFIER_BOOST`) and a `normalize_scores` helper that scales scores to `[0, 1]` also exist in this module, but are NOT yet wired into the live fused path; wiring them requires a measured search-quality evaluation first.
+Reciprocal Rank Fusion with `RRF_K = 60`. The live fused path is `fuse_n`: for identifier-shaped queries (`looks_like_identifier`, single dotted/kebab/snake/camelCase token, excluding bare decimal numbers like `3.14`) it calls `rrf_merge_n_weighted` with a `1.5x` (`IDENTIFIER_BOOST`) weight on the BM25 list; otherwise it calls `rrf_merge_n`, which merges any number of ranked id lists with equal weight. Both return raw (non-normalized) RRF scores.
 
 ### Tokenization (`src/tokenize.rs`)
 
@@ -30,9 +28,9 @@ Offline ranking metrics against a qrels map: `ndcg_at_k`, `mrr`, `recall_at_k`, 
 
 ### Host boundary (`src/wasm_host.rs`)
 
-Declares the host imports under `wasm_import_module = "env"`: `host_vec_search`, `host_bm25_search`, `host_git_search`, `host_log`, `host_now_ms`. Each returns a packed `(ptr, len)` `u64` that is unpacked and decoded as a JSON `Vec<HostHit>`.
+Declares the host imports under `wasm_import_module = "env"`: `host_vec_search`, `host_bm25_search`, `host_git_search`, `host_log`, `host_now_ms`. Each returns a packed `(ptr, len)` `u64` that is unpacked, bounds-checked, and decoded as a JSON `Vec<HostHit>`; an oversized or malformed `len` returns a `Result::Err` instead of trapping the wasm instance.
 
-`fusion_search(query, k, root)` is the live entry: it asks the host for vector, BM25, and git candidates (candidate count is `k * 5` floored at 50), collects their payloads, merges the three ranked lists with `rrf_merge_n`, takes the top `k`, and sorts by score then id.
+`fusion_search(query, k, root)` is the live entry: it asks the host for vector, BM25, and git candidates (candidate count is `k * 5` floored at 50), collects their payloads, merges the three ranked lists with `fuse_n` (weights `[1.0, IDENTIFIER_BOOST, 1.0]`), takes the top `k`, and sorts by score then id.
 
 ### Public API (`src/lib.rs`)
 
