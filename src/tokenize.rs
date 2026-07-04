@@ -1,9 +1,5 @@
 use std::collections::HashSet;
 
-fn char_len(s: &str) -> usize {
-    s.chars().count()
-}
-
 pub fn split_camel(word: &str) -> Vec<String> {
     let chars: Vec<char> = word.chars().collect();
     let mut tokens = Vec::new();
@@ -14,26 +10,26 @@ pub fn split_camel(word: &str) -> Vec<String> {
         let prev_lower = i > 0 && chars[i-1].is_lowercase();
         let next_lower = i + 1 < chars.len() && chars[i+1].is_lowercase();
         if is_upper && (prev_lower || next_lower) && !cur.is_empty() {
-            if char_len(&cur) >= 1 { tokens.push(cur.to_lowercase()); }
+            tokens.push(cur.to_lowercase());
             cur = c.to_string();
         } else {
             cur.push(c);
         }
     }
-    if char_len(&cur) >= 1 { tokens.push(cur.to_lowercase()); }
+    if !cur.is_empty() { tokens.push(cur.to_lowercase()); }
     tokens
 }
 
 pub fn add_word_tokens(word: &str, out: &mut HashSet<String>) {
-    if word != word.to_lowercase() {
-        for t in split_camel(word) { if char_len(&t) >= 1 { out.insert(t); } }
+    if word.chars().any(|c| c.is_uppercase()) {
+        for t in split_camel(word) { if !t.is_empty() { out.insert(t); } }
     }
     for part in word.split(|c: char| c == '-' || c == '_' || c == '.') {
         let pc: String = part.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
-        if char_len(&pc) >= 1 { out.insert(pc); }
+        if !pc.is_empty() { out.insert(pc); }
     }
     let cleaned: String = word.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect::<String>().to_lowercase();
-    if char_len(&cleaned) >= 1 { out.insert(cleaned); }
+    if !cleaned.is_empty() { out.insert(cleaned); }
 }
 
 pub fn tokenize(text: &str) -> Vec<String> {

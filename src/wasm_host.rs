@@ -123,10 +123,10 @@ pub fn fusion_search(query: &str, k: u32, root: &str) -> Vec<HostHit> {
     let git_hits = git_result.unwrap_or_default();
 
     let all_hits = [&vec_hits, &bm25_hits, &git_hits];
-    let mut payloads: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+    let mut payloads: std::collections::HashMap<&str, &serde_json::Value> = std::collections::HashMap::new();
     for source in &all_hits {
         for hit in source.iter() {
-            payloads.entry(hit.id.clone()).or_insert_with(|| hit.payload.clone());
+            payloads.entry(hit.id.as_str()).or_insert(&hit.payload);
         }
     }
 
@@ -135,15 +135,13 @@ pub fn fusion_search(query: &str, k: u32, root: &str) -> Vec<HostHit> {
         .collect();
 
     let weights = [1.0, crate::fusion::IDENTIFIER_BOOST, 1.0];
-    let mut results: Vec<HostHit> = crate::fusion::fuse_n(&ranked_lists, &weights, query)
+    crate::fusion::fuse_n(&ranked_lists, &weights, query)
         .into_iter()
         .take(k as usize)
         .map(|(id, score)| HostHit {
-            payload: payloads.remove(&id).unwrap_or(serde_json::Value::Null),
+            payload: payloads.get(id.as_str()).map(|v| (*v).clone()).unwrap_or(serde_json::Value::Null),
             id,
             score: score as f32,
         })
-        .collect();
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.id.cmp(&b.id)));
-    results
+        .collect()
 }

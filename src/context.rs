@@ -9,19 +9,25 @@ fn looks_like_continued_signature(line: &str) -> bool {
     trimmed.ends_with('(') || trimmed.ends_with(',')
 }
 
+const MAX_SIGNATURE_JOIN: usize = 8;
+
 pub fn find_enclosing_context(content: &str, line_start: usize) -> Option<String> {
+    if content.trim().is_empty() { return None; }
     let lines: Vec<&str> = content.split('\n').collect();
-    let target = (line_start.saturating_sub(1)).min(lines.len().saturating_sub(1));
+    if lines.is_empty() { return None; }
+    let target = (line_start.saturating_sub(1)).min(lines.len() - 1);
     let mut i = target as isize;
     while i >= 0 {
         let idx = i as usize;
-        let mut accum = lines[idx].to_string();
         let mut k = idx;
-        while looks_like_continued_signature(&lines[k]) && k > 0 {
+        let mut joined: Option<String> = None;
+        while looks_like_continued_signature(lines[k]) && k > 0 && idx - k < MAX_SIGNATURE_JOIN {
             k -= 1;
-            accum = format!("{} {}", lines[k].trim_end(), accum.trim_start());
+            let tail = joined.as_deref().unwrap_or(lines[idx]);
+            joined = Some(format!("{} {}", lines[k].trim_end(), tail.trim_start()));
         }
-        if let Some(caps) = RE.captures(&accum) {
+        let candidate = joined.as_deref().unwrap_or(lines[idx]);
+        if let Some(caps) = RE.captures(candidate) {
             for j in 1..caps.len() {
                 if let Some(m) = caps.get(j) {
                     let name = m.as_str();
