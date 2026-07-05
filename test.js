@@ -20,7 +20,7 @@ const exists = (p) => fs.existsSync(path.join(root, p));
 check('Cargo.toml is a wasm cdylib with the real dep set', () => {
     const c = read('Cargo.toml');
     if (!/name\s*=\s*"rs-search"/.test(c)) throw new Error('package name wrong');
-    if (!/crate-type\s*=\s*\["cdylib"\]/.test(c)) throw new Error('crate-type cdylib missing');
+    if (!/crate-type\s*=\s*\["cdylib",\s*"rlib"\]/.test(c)) throw new Error('crate-type cdylib+rlib missing');
     for (const dep of ['serde', 'serde_json', 'regex']) {
         if (!new RegExp(`(^|\\n)${dep}\\s*=`).test(c)) throw new Error(`${dep} dep missing`);
     }

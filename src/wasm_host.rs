@@ -18,23 +18,6 @@ pub fn unpack(packed: u64) -> (u32, u32) {
 
 const MAX_HOST_RESPONSE_BYTES: u32 = 32 * 1024 * 1024;
 
-// SAFETY: ptr/len cross the wasm-host ABI boundary from plugkit-wasm-wrapper.js,
-// a host we control (not arbitrary/untrusted wasm callers). There is no way for
-// guest code to independently verify the pointer targets a live, correctly
-// aligned allocation of at least `len` bytes -- that guarantee comes entirely
-// from the wrapper's own packing (`(ptr | len << 32)` over its own buffer) and
-// from the wasm32 linear-memory model, where every host-visible ptr is a
-// byte-aligned offset into the single sandboxed memory (so u8 alignment is
-// always satisfied). The len sanity bound below is not a validity check --
-// it is a defense against a corrupted/misbehaving host packing an absurd len
-// and this code reading far past the actual response, capped at a size no
-// legitimate search-index blob (hit list, bm25/git result JSON) should exceed.
-//
-// No free call after the copy: this is the same host_vec_search-family
-// convention rs-plugkit's wasm_dispatch.rs uses (unpack_to_value/unpack_to_string
-// never free either) -- the JS host retains and manages this buffer itself,
-// unlike rs-exec's separate rs_exec_alloc/rs_exec_free pair, which exists only
-// for buffers the wasm side itself allocated via rs_exec_alloc.
 unsafe fn take_bytes(packed: u64) -> Result<Vec<u8>, String> {
     let (ptr, len) = unpack(packed);
     if ptr == 0 || len == 0 {

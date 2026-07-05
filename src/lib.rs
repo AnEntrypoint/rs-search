@@ -2,6 +2,7 @@ pub mod context;
 pub mod eval;
 pub mod fusion;
 pub mod tokenize;
+#[cfg(target_arch = "wasm32")]
 pub mod wasm_host;
 
 use std::path::PathBuf;
@@ -17,6 +18,7 @@ pub struct Searcher {
     pub root: PathBuf,
 }
 
+#[cfg(target_arch = "wasm32")]
 impl Searcher {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
