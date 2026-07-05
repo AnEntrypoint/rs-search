@@ -15,24 +15,22 @@ const check = (name, fn) => {
 };
 
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
-const exists = (p) => fs.existsSync(path.join(root, p));
 
-check('Cargo.toml is a wasm cdylib with the real dep set', () => {
+check('Cargo.toml is a dependency-free rlib consumed by rs-plugkit', () => {
     const c = read('Cargo.toml');
     if (!/name\s*=\s*"rs-search"/.test(c)) throw new Error('package name wrong');
-    if (!/crate-type\s*=\s*\["cdylib",\s*"rlib"\]/.test(c)) throw new Error('crate-type cdylib+rlib missing');
-    for (const dep of ['serde', 'serde_json', 'regex']) {
-        if (!new RegExp(`(^|\\n)${dep}\\s*=`).test(c)) throw new Error(`${dep} dep missing`);
-    }
+    if (!/crate-type\s*=\s*\["rlib"\]/.test(c)) throw new Error('crate-type rlib missing');
+    if (/\[dependencies\]/.test(c)) throw new Error('crate must stay dependency-free');
 });
 
-check('lib.rs exposes the real modules', () => {
+check('lib.rs exposes exactly the consumed modules', () => {
     const c = read('src/lib.rs');
-    for (const m of ['context', 'eval', 'fusion', 'tokenize', 'wasm_host']) {
+    for (const m of ['fusion', 'tokenize']) {
         if (!new RegExp(`pub mod ${m};`).test(c)) throw new Error(`${m} not in lib.rs`);
     }
-    if (!/pub struct Searcher/.test(c)) throw new Error('Searcher struct missing');
-    if (!/pub fn search\(&self, query: &str, k: usize\)/.test(c)) throw new Error('search entry missing');
+    for (const dead of ['context', 'eval', 'wasm_host', 'Searcher', 'SearchHit']) {
+        if (c.includes(dead)) throw new Error(`consumer-free surface ${dead} must stay deleted`);
+    }
 });
 
 check('fusion implements RRF k=60 with identifier boost', () => {
@@ -43,34 +41,14 @@ check('fusion implements RRF k=60 with identifier boost', () => {
     if (!c.includes('fn fuse_n')) throw new Error('fuse_n entry point missing');
     if (!c.includes('fn rrf_merge_n_weighted')) throw new Error('rrf_merge_n_weighted missing');
     if (!c.includes('fn rrf_merge_n')) throw new Error('rrf_merge_n missing');
-    if (c.includes('fn normalize_scores')) throw new Error('dead normalize_scores should be removed');
 });
 
-check('eval has NDCG/MRR/recall/precision', () => {
-    const c = read('src/eval.rs');
-    for (const fn of ['ndcg_at_k', 'mrr', 'recall_at_k', 'precision_at_k', 'evaluate']) {
-        if (!new RegExp(`fn ${fn}`).test(c)) throw new Error(`${fn} missing`);
-    }
-});
-
-check('tokenize splits camelCase', () => {
+check('tokenize splits camelCase and strips punctuation from camel tokens', () => {
     const c = read('src/tokenize.rs');
     if (!c.includes('fn split_camel')) throw new Error('split_camel missing');
     if (!c.includes('fn tokenize')) throw new Error('tokenize entry missing');
-});
-
-check('context resolves enclosing scope', () => {
-    const c = read('src/context.rs');
-    if (!c.includes('fn find_enclosing_context')) throw new Error('find_enclosing_context missing');
-});
-
-check('wasm host imports carry link(wasm_import_module = env)', () => {
-    const c = read('src/wasm_host.rs');
-    if (!c.includes('#[link(wasm_import_module = "env")]')) throw new Error('link module attr missing');
-    if (!/extern "C"/.test(c)) throw new Error('extern C block missing');
-    for (const imp of ['host_vec_search', 'host_bm25_search', 'host_git_search']) {
-        if (!c.includes(imp)) throw new Error(`${imp} import missing`);
-    }
+    if (!c.includes('fn add_word_tokens')) throw new Error('add_word_tokens missing');
+    if (!/for p in t\.split\(\|c: char\| !c\.is_alphanumeric\(\)\)/.test(c)) throw new Error('camel tokens must be split on non-alphanumerics');
 });
 
 check('no UTF-8 BOM in tracked text files', () => {
@@ -89,11 +67,13 @@ check('no UTF-8 BOM in tracked text files', () => {
     }
 });
 
-check('no // or /* comments in rust source', () => {
+check('no // or /* comments and no cfg(test) in rust source', () => {
     const dir = path.join(root, 'src');
     for (const f of fs.readdirSync(dir)) {
         if (!f.endsWith('.rs')) continue;
-        for (const line of read(path.join('src', f)).split('\n')) {
+        const c = read(path.join('src', f));
+        if (c.includes('#[cfg(test)]')) throw new Error(`${f} has synthetic test module`);
+        for (const line of c.split('\n')) {
             const t = line.trim();
             if (t.startsWith('//') || t.startsWith('/*')) throw new Error(`${f} has comment: ${t}`);
         }
