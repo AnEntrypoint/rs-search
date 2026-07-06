@@ -2,24 +2,17 @@
 
 ## Local build
 
-This is a plain stable-Rust crate (`serde`, `serde_json`, `regex` only) compiled to a WASM `cdylib`. No nightly toolchain, no MSVC/oniguruma setup, no GGUF model download.
+This is a plain stable-Rust, dependency-free `rlib` crate. No nightly toolchain, no wasm target, no feature flags, no MSVC/oniguruma setup, no GGUF model download.
 
 ```bash
-cargo check --target wasm32-wasip1 --no-default-features --features wasm --lib
-cargo test --lib
+cargo build --lib
+cargo check --lib
 ```
-
-`rustup target add wasm32-wasip1` first if the target isn't installed.
-
-## Build features
-
-- `wasm` — the `cdylib` wasm build feature.
-- default features: none.
 
 ## Ship
 
-There is no standalone binary and no `cargo install` path. Pushing to this repo triggers `.github/workflows/cascade.yml` and `.github/workflows/wasm-check.yml`; CI is authoritative and runs on `dtolnay/rust-toolchain@stable`.
+There is no standalone binary and no `cargo install` path. Pushing to this repo triggers `.github/workflows/cascade.yml`; CI is authoritative and runs on the stable toolchain.
 
 ## Testing
 
-No synthetic test files or mocking frameworks. Verify via `cargo test --lib` (the in-module `#[cfg(test)]` blocks in `src/fusion.rs`) and the root `test.js` (structural/hygiene checks, mock-free, real file reads: `node test.js`).
+No synthetic test files, no `#[cfg(test)]` blocks, no mocking frameworks. Verify via the root `test.js` (structural/hygiene checks, mock-free, real file reads: `node test.js`) plus real compiled execution (`cargo build --lib`, or a throwaway `cargo run --example` witness deleted after use) for behavioral changes.

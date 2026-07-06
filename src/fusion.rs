@@ -9,9 +9,12 @@ pub fn looks_like_identifier(query: &str) -> bool {
     let has_non_digit_non_period = q.chars().any(|c| c != '.' && !c.is_ascii_digit());
     let has_separator = has_non_digit_non_period
         && (q.contains('_') || q.contains('-') || q.contains('.'));
-    let has_upper_lower = q.chars().any(|c| c.is_uppercase())
-        && q.chars().any(|c| c.is_lowercase());
-    has_separator || has_upper_lower
+    let chars: Vec<char> = q.chars().collect();
+    let has_mid_word_case_transition = chars.windows(2).enumerate().any(|(i, w)| {
+        if i == 0 { return false; }
+        (w[0].is_lowercase() && w[1].is_uppercase()) || (w[0].is_uppercase() && w[1].is_lowercase())
+    });
+    has_separator || has_mid_word_case_transition
 }
 
 pub fn rrf_merge_n(ranked_lists: &[Vec<String>]) -> Vec<(String, f64)> {
@@ -22,7 +25,9 @@ pub fn rrf_merge_n_weighted(ranked_lists: &[Vec<String>], weights: &[f64]) -> Ve
     let mut scores: HashMap<String, f64> = HashMap::new();
     for (li, ranked) in ranked_lists.iter().enumerate() {
         let w = weights.get(li).copied().unwrap_or(1.0);
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for (rank, id) in ranked.iter().enumerate() {
+            if !seen.insert(id.as_str()) { continue; }
             *scores.entry(id.clone()).or_insert(0.0) += w / (RRF_K + (rank + 1) as f64);
         }
     }

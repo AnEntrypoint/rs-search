@@ -28,12 +28,14 @@ pub fn add_word_tokens(word: &str, out: &mut HashSet<String>) {
             }
         }
     }
-    for part in word.split(|c: char| c == '-' || c == '_' || c == '.') {
-        let pc: String = part.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
+    for part in word.split(|c: char| !c.is_alphanumeric()) {
+        let pc = part.to_lowercase();
         if !pc.is_empty() { out.insert(pc); }
     }
-    let cleaned: String = word.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect::<String>().to_lowercase();
-    if !cleaned.is_empty() { out.insert(cleaned); }
+    if word.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        let cleaned = word.to_lowercase();
+        if !cleaned.is_empty() { out.insert(cleaned); }
+    }
 }
 
 pub fn tokenize(text: &str) -> Vec<String> {
