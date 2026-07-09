@@ -2,11 +2,11 @@
 
 # rs-search
 
-A Rust crate compiled to a WebAssembly `cdylib`. It provides search-fusion and text-analysis primitives consumed inside the plugkit WASM stack. There is no CLI, no MCP server, no embedding model, and no installable binary in this repo.
+A small, dependency-free Rust `rlib` (`rs_search`) consumed as a normal Cargo git dependency by rs-plugkit. It provides search-fusion and tokenization primitives only -- there is no CLI, no MCP server, no embedding model, no installable binary, no `cdylib` target.
 
 ## Dependencies
 
-`serde`, `serde_json`, `regex`. Nothing else — no `candle-core`, no GGUF loading, no oniguruma/MSVC requirement.
+None. `Cargo.toml` has no `[dependencies]` section.
 
 ## Toolchain
 
@@ -14,39 +14,27 @@ Builds on stable Rust. `rust-toolchain.toml` pins `channel = "stable"`. CI (`dto
 
 ## Architecture
 
-### Host boundary (`src/wasm_host.rs`)
-
-Declares host imports under `#[link(wasm_import_module = "env")]`: `host_vec_search`, `host_bm25_search`, `host_git_search`, `host_log`, `host_now_ms`. Each search import returns a packed `(ptr, len)` `u64`; `take_bytes` unpacks and copies the bytes (bounded, error-returning — a malformed host response surfaces as a `Result::Err`, never a raw slice trap), and the caller decodes it as a JSON `Vec<HostHit>`.
-
-`fusion_search(query, k, root)` is the live entry point: it requests vector, BM25, and git candidate lists from the host (candidate count `k * 5` floored at 50), collects payloads, and merges the three ranked lists via `crate::fusion::fuse_n` with per-source weights (`[1.0, IDENTIFIER_BOOST, 1.0]`), taking the top `k`.
+The crate has exactly three source files: `src/lib.rs`, `src/fusion.rs`, `src/tokenize.rs`.
 
 ### Fusion (`src/fusion.rs`)
 
-Reciprocal Rank Fusion with `RRF_K = 60`. `fuse_n` is the live fused path: it calls `rrf_merge_n_weighted` (applies the `1.5x` `IDENTIFIER_BOOST` to the BM25 list) when `looks_like_identifier(query)` is true, else `rrf_merge_n` (equal weight across all lists). `looks_like_identifier` treats snake_case/kebab-case/dotted/camelCase single-token queries as identifier-shaped, while excluding bare decimal-number tokens (e.g. `3.14`) from the dot-separator check.
+Reciprocal Rank Fusion with `RRF_K = 60`. The entry point is `fuse_n(ranked_lists, weights, query)`: when `looks_like_identifier(query)` is true (query has a separator -- `_`/`-`/`.` -- or a mid-word case transition, e.g. `myVariable`/`HTTPServer`; a single Title-Case word like `Hello` does not qualify), it calls `rrf_merge_n_weighted(ranked_lists, weights)`, applying the caller's per-list weights (rs-plugkit passes `[1.0, IDENTIFIER_BOOST]` to boost the BM25 list for identifier-shaped queries). Otherwise it calls `rrf_merge_n(ranked_lists)`, which merges any number of ranked id lists with equal weight -- the `weights` argument is intentionally not applied on this branch, since the boost is specifically an identifier-search heuristic and has no justified rationale for natural-language queries. Within a single ranked list, a duplicate id is deduplicated to its first (best) rank -- a backend that emits the same id twice in one list contributes only one RRF term for it. Both merge functions return raw (non-normalized) RRF scores.
 
 ### Tokenization (`src/tokenize.rs`)
 
-`tokenize` splits text into lowercased tokens, with identifier-aware splitting: camelCase boundaries (`split_camel`) plus kebab/snake/dot separators. Tokens shorter than 2 chars are dropped; output is deduplicated and sorted.
-
-### Enclosing context (`src/context.rs`)
-
-`find_enclosing_context` scans upward from a target line to find the nearest enclosing function, class, struct, or `impl` name, used to label snippets.
-
-### Evaluation metrics (`src/eval.rs`)
-
-Offline ranking metrics against a qrels map: `ndcg_at_k`, `mrr`, `recall_at_k`, `precision_at_k`, plus `dcg`. `evaluate` aggregates NDCG@10, MRR, Recall@100, and P@10 into an `EvalReport`.
+`tokenize` splits text into lowercased tokens. `add_word_tokens` per word: if the word contains an uppercase letter, `split_camel` breaks it at camelCase boundaries, and each resulting piece is further split on every non-alphanumeric character. Every word (camelCase or not) is also split on every non-alphanumeric character directly (not just `-`/`_`/`.`), so `foo::bar` yields both `foo` and `bar`. If the whole word is alphanumeric-or-underscore only (no other punctuation), the whole lowercased word is kept as an additional token, so `my_variable_name` is searchable both as its parts (`my`, `variable`, `name`) and as the literal identifier. Output is deduplicated and sorted.
 
 ### Public API (`src/lib.rs`)
 
-`Searcher::new(root)` and `Searcher::search(query, k)` drive `fusion_search` and map host hits into `SearchHit { id, score, snippet }`. `k == 0` returns empty.
+`pub mod fusion; pub mod tokenize;` -- the crate exposes exactly these two modules and nothing else.
 
 ## Build and ship
 
-`crate-type = ["cdylib"]`, `wasm` feature. Ships through the WASM cascade: pushing to this repo triggers `.github/workflows/cascade.yml`; `.github/workflows/wasm-check.yml` validates both the wasm target build and the native test suite. No local `cargo build`/`cargo install`, no published binary, no standalone install.
+`crate-type = ["rlib"]`, consumed as a normal Cargo git dependency (see rs-plugkit's `Cargo.toml`, `rs-search` entry pointing at this repo). `cargo build`/`cargo check` work locally with the standard stable toolchain, no target/feature flags. Pushing to this repo triggers `.github/workflows/cascade.yml` as part of the wider cascade pipeline; CI is authoritative.
 
-## Cascade wiring note
+## Live wiring
 
-As of this writing, `rs-plugkit` does not depend on this crate — it implements its own host-vec-search-based codesearch directly. This crate's fusion/tokenize/context/eval logic is not currently consumed by the live cascade; fix bugs and keep docs accurate here regardless, since orphaned wiring status does not make the crate's own correctness or documentation less real.
+`rs-plugkit` DOES depend on this crate (`Cargo.toml`: `rs-search = { git = "...", package = "rs-search" }`) and actively calls both live modules: `rs_search::tokenize::tokenize`/`add_word_tokens` (code_index.rs's BM25 ranking + git-commit-rank fallback tokenization) and `rs_search::fusion::fuse_n`/`IDENTIFIER_BOOST` (wasm_dispatch.rs's codesearch fusion of vector+BM25 result lists). Both modules are live, wired, load-bearing dependencies of rs-plugkit's real codesearch verb -- not orphaned.
 
 ## Verification
 
