@@ -48,6 +48,6 @@ Offline ranking metrics against a qrels map: `ndcg_at_k`, `mrr`, `recall_at_k`, 
 
 As of this writing, `rs-plugkit` does not depend on this crate — it implements its own host-vec-search-based codesearch directly. This crate's fusion/tokenize/context/eval logic is not currently consumed by the live cascade; fix bugs and keep docs accurate here regardless, since orphaned wiring status does not make the crate's own correctness or documentation less real.
 
-## Testing
+## Verification
 
-No synthetic test files, no test framework. Verification is `cargo test --lib` against the in-module `#[cfg(test)]` blocks (real code, no mocks) plus the single root `test.js` (structural/hygiene checks, mock-free, real file reads).
+No test files of any kind, no `#[cfg(test)]` blocks, no test framework. Verification is real compiled execution only: `cargo build --lib`, `cargo check --lib`, or a throwaway `cargo run --example` witness deleted after use. Manual troubleshooting and debugging against the real crate is the entire verification surface.

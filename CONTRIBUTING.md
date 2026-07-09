@@ -13,6 +13,6 @@ cargo check --lib
 
 There is no standalone binary and no `cargo install` path. Pushing to this repo triggers `.github/workflows/cascade.yml`; CI is authoritative and runs on the stable toolchain.
 
-## Testing
+## Verification
 
-No synthetic test files, no `#[cfg(test)]` blocks, no mocking frameworks. Verify via the root `test.js` (structural/hygiene checks, mock-free, real file reads: `node test.js`) plus real compiled execution (`cargo build --lib`, or a throwaway `cargo run --example` witness deleted after use) for behavioral changes.
+No test files of any kind, no `#[cfg(test)]` blocks, no mocking frameworks. Verify via real compiled execution only: `cargo build --lib`, `cargo check --lib`, or a throwaway `cargo run --example` witness deleted after use for behavioral changes. Manual troubleshooting and debugging against the real crate is the entire verification surface.

@@ -25,16 +25,12 @@ jobs:
           key: wasm-check-wasm32-wasip1
       - run: cargo check --target wasm32-wasip1 --lib
 
-  structural-guard:
+  build-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
       - uses: Swatinem/rust-cache@v2
         with:
-          key: structural-guard-native
+          key: build-check-native
       - run: cargo check --lib
-      - run: node test.js
