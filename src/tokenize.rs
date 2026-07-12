@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-pub fn split_camel(word: &str) -> Vec<String> {
+pub(crate) fn split_camel(word: &str) -> Vec<String> {
     let chars: Vec<char> = word.chars().collect();
     let mut tokens = Vec::new();
     let mut cur = String::new();

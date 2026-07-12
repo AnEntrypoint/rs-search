@@ -3,7 +3,7 @@ use std::collections::HashMap;
 pub const RRF_K: f64 = 60.0;
 pub const IDENTIFIER_BOOST: f64 = 1.5;
 
-pub fn looks_like_identifier(query: &str) -> bool {
+pub(crate) fn looks_like_identifier(query: &str) -> bool {
     let q = query.trim();
     if q.is_empty() || q.contains(' ') { return false; }
     let has_non_digit_non_period = q.chars().any(|c| c != '.' && !c.is_ascii_digit());
@@ -17,11 +17,11 @@ pub fn looks_like_identifier(query: &str) -> bool {
     has_separator || has_mid_word_case_transition
 }
 
-pub fn rrf_merge_n(ranked_lists: &[Vec<String>]) -> Vec<(String, f64)> {
+pub(crate) fn rrf_merge_n(ranked_lists: &[Vec<String>]) -> Vec<(String, f64)> {
     rrf_merge_n_weighted(ranked_lists, &[])
 }
 
-pub fn rrf_merge_n_weighted(ranked_lists: &[Vec<String>], weights: &[f64]) -> Vec<(String, f64)> {
+pub(crate) fn rrf_merge_n_weighted(ranked_lists: &[Vec<String>], weights: &[f64]) -> Vec<(String, f64)> {
     let mut scores: HashMap<String, f64> = HashMap::new();
     for (li, ranked) in ranked_lists.iter().enumerate() {
         let w = weights.get(li).copied().unwrap_or(1.0);
