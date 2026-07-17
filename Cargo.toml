@@ -2,6 +2,13 @@
 name = "rs-search"
 version = "0.1.0"
 edition = "2021"
+description = "Dependency-free RRF search fusion and identifier-aware tokenization for rs-plugkit's WASM host."
+repository = "https://github.com/AnEntrypoint/rs-search"
+homepage = "https://github.com/AnEntrypoint/rs-search"
+license = "MIT"
+readme = "README.md"
+keywords = ["search", "fusion", "tokenize", "rrf", "wasm"]
+categories = ["algorithms", "text-processing"]
 
 [lib]
 name = "rs_search"
