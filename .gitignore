@@ -33,6 +33,11 @@ dist/
 .gm/last-instruction-ts
 .gm/last-prompt.txt
 .gm/long-gap-retry-state
+.gm/instructions-source-cache/
+.gm/config-source-cache/
+.gm/config-source-cache-default/
+.gm/config-source-cache-default.*.sync.json
+.gm/config-source-cache.*.sync.json
 # tracked: .gm/rs-learn.db, .gm/code-search/, .gm/disciplines/, AGENTS.md, .gm/prd.yml
 # <<< gm managed
 .gm/pw-sock-*/
