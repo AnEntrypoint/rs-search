@@ -48,11 +48,6 @@ pub fn fuse_n(ranked_lists: &[Vec<String>], weights: &[f64], query: &str) -> Vec
     }
 }
 
-/// Same identifier-heuristic branching as [`fuse_n`], but with a caller-supplied
-/// `rrf_k` and per-list `weights` that also apply on the non-identifier branch
-/// (equal weights there reproduce [`fuse_n`]'s behavior exactly) -- this is the
-/// entry point a config-driven caller uses to make the blend genuinely tunable
-/// rather than hardcoded to [`RRF_K`]/[`IDENTIFIER_BOOST`].
 pub fn fuse_n_cfg(ranked_lists: &[Vec<String>], weights: &[f64], query: &str, rrf_k: f64) -> Vec<(String, f64)> {
     if looks_like_identifier(query) {
         rrf_merge_n_weighted_k(ranked_lists, weights, rrf_k)
