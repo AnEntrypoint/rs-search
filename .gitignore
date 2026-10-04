@@ -44,5 +44,4 @@ dist/
 .gm/disciplines/codeinsight/
 .gm/disciplines/codeinsight-vec/
 .gm/disciplines/codeinsight-manifest/
-config.bat
 node_modules
