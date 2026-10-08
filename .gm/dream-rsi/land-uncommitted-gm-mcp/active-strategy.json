@@ -1,0 +1,1 @@
+{"evidence":[{"dispatch_id":"1791069755631-13-7d8c4bdfe8d07854","exit_code":0,"fingerprint":"761cbc8ec8d82797","gate_drift":false,"mutable_open_count":0,"prd_open_count":0,"quality":1.0,"ts":1791069755634,"verb":"codesearch"}],"failed_dispatch_count":0,"gate_drift_failure_count":0,"observation_count":1,"selection":"continue-current-exploration","successful_dispatch_count":1}
