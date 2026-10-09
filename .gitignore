@@ -1,0 +1,47 @@
+/target
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+dist/
+.plugkit-browser-profile/
+.plugkit-browser-profile-*/
+.plugkit-agent-worktree/
+*.stackdump
+.code-search/
+.codeinsight
+.codeinsight/
+# >>> gm managed (do not edit between markers)
+.gm/gm-fired-*
+.gm/residual-check-fired
+.gm-stop-verified
+.gm/prd-state.json
+.gm/rslearn-counter.json
+.gm/git-block-counter.json
+.gm/learning-state.md
+.gm/trajectory-drafts/
+.gm/ingest-drafts/
+.gm/needs-gm
+.gm/lastskill
+.gm/turn-state.json
+.gm/no-memorize-this-turn
+.gm/prd.paused.yml
+.gm/rs-learn.db-shm
+.gm/rs-learn.db-wal
+.gm/exec-spool/
+.gm/last-dispatch-ts
+.gm/last-instruction-ts
+.gm/last-prompt.txt
+.gm/long-gap-retry-state
+.gm/instructions-source-cache/
+.gm/config-source-cache/
+.gm/config-source-cache-default/
+.gm/config-source-cache-default.*.sync.json
+.gm/config-source-cache.*.sync.json
+# tracked: .gm/rs-learn.db, .gm/code-search/, .gm/disciplines/, AGENTS.md, .gm/prd.yml
+# <<< gm managed
+.gm/pw-sock-*/
+.gm/disciplines/codeinsight/
+.gm/disciplines/codeinsight-vec/
+.gm/disciplines/codeinsight-manifest/
+node_modules

@@ -1,0 +1,17 @@
+name: Cascade to rs-plugkit
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE', '.gitignore']
+
+jobs:
+  cascade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch downstream release (push to main = PR merged)
+        env:
+          GH_TOKEN: ${{ secrets.PUBLISHER_TOKEN }}
+        run: |
+          gh workflow run release.yml --repo AnEntrypoint/rs-plugkit --ref main
